@@ -27,7 +27,8 @@ abstract contract Pausable is Ownable {
             !paused ||
                 _msgSender() == owner() ||
                 approvedAddresses[_reciever].canCall ||
-                approvedAddresses[_msgSender()].canCall
+                approvedAddresses[_msgSender()].canCall,
+            "Ownable: caller is not the owner or approved"
         );
         _;
     }
@@ -101,16 +102,18 @@ abstract contract ERC20PausableAndBurnable is ERC20Burnable, Pausable {
     }
 }
 
-abstract contract ApproveAndCallFallBack {
-    function receiveApproval(
+interface TransferAndCallFallBack {
+    function onTokenTransfer(
         address from,
         uint256 amount,
-        address token,
         bytes calldata extraData
-    ) external virtual;
+    ) external;
 }
 
 contract TSCoin is ERC20PausableAndBurnable {
+    //Events
+    event AddInitApproval(address user, bool canUnpause);
+    event RemoveInitApproval(address user);
 
     /**
      * @dev Initialize contract
@@ -124,26 +127,27 @@ contract TSCoin is ERC20PausableAndBurnable {
         address _initApproval
     ) ERC20(_name, _symbol, _decimals) {
         require(_initApproval != address(0));
-        _mint(_recipient, _initialSupply * 10 ** _decimals);
+        _mint(_recipient, _initialSupply * 10**_decimals);
         approvedAddresses[_initApproval] = ApprovedAddresses(true, true);
     }
 
     /**
      * @dev Approves amount of tokens and calls external functions
      **/
-    function approveAndCall(
-        address spender,
-        uint256 amount,
+    function transferAndCall(
+        address _to,
+        uint256 _amount,
         bytes memory extraData
     ) public returns (bool) {
-        require(approve(spender, amount));
+        require(transfer(_to, _amount));
 
-        ApproveAndCallFallBack(spender).receiveApproval(
-            msg.sender,
-            amount,
-            address(this),
-            extraData
-        );
+        if (isContract(_to)) {
+            TransferAndCallFallBack(_to).onTokenTransfer(
+                msg.sender,
+                _amount,
+                extraData
+            );
+        }
 
         return true;
     }
@@ -157,6 +161,7 @@ contract TSCoin is ERC20PausableAndBurnable {
     {
         require(_initApproval != address(0));
         approvedAddresses[_initApproval] = ApprovedAddresses(true, _canUnpause);
+        emit AddInitApproval(_initApproval, _canUnpause);
     }
 
     /**
@@ -165,5 +170,14 @@ contract TSCoin is ERC20PausableAndBurnable {
     function removeInitApproval(address _initApproval) public onlyOwner {
         require(_initApproval != address(0));
         approvedAddresses[_initApproval] = ApprovedAddresses(false, false);
+        emit RemoveInitApproval(_initApproval);
+    }
+
+    function isContract(address _addr) private view returns (bool hasCode) {
+        uint256 length;
+        assembly {
+            length := extcodesize(_addr)
+        }
+        return length > 0;
     }
 }
