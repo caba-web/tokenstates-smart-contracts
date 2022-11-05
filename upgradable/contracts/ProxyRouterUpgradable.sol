@@ -100,7 +100,7 @@ contract ProxyRouterUpgradable is
     event Payout(address to, uint256 amount);
     event Credited(address user, uint256 amount);
 
-    /** @dev Initialez contract
+    /** @dev Initializes contract
      * @param _treasuries Treasuries List of objects.
      * @param _referralsContractAddress referral contract address
      * @param _gamesPoolContractAddress gamesPool contract address

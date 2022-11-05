@@ -3,7 +3,6 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "./ERC20/utils/SafeERC20.sol";
 
 library Structs {
@@ -35,8 +34,19 @@ interface ReferralsContractInterface {
         returns (uint256);
 
     function addReferralFatherFee(uint256 _amount, address _childReferral)
-        external
-        payable;
+        external;
+}
+
+interface ValidatorContractInterface {
+    function createToken(address _tokenAddress) external;
+
+    function updateTokenPaused(address _tokenAddress, bool _isPaused) external;
+
+    function deleteToken(address _tokenAddress) external;
+}
+
+interface TSCoinContract {
+    function notPausable() external;
 }
 
 contract ProxyRouter is Ownable, ReentrancyGuard {
@@ -45,23 +55,26 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
     IERC20 public immutable token; // usdt token.
 
     ReferralsContractInterface internal referralsContract;
+    ValidatorContractInterface internal validatorContract;
 
     address public referralsContractAddress;
+    address public validatorContractAddress;
 
     mapping(address => Structs.Token) public tokens;
 
     // Events
-    event Buy(address _address, uint256 _amount, uint256 _price);
-    event Refund(address _address, uint256 _amount, uint256 _price);
-    event Claim(address _address, uint256 _amount, uint256 _price);
-    event TokenAdded(Structs.Token _token);
-    event TokenUpdated(Structs.Token _token);
-    event TokenDeleted(address _tokenAddress);
-    event TokenClosed(address _tokenAddress);
-    event UpdateReferralContractAddress(address _referralsContractAddress);
+    event TokenAdded(Structs.Token tokenObj);
+    event TokenUpdated(Structs.Token tokenObj);
+    event TokenDeleted(address tokenAddress);
+    event TokenClosed(address tokenAddress);
+    event UpdateReferralContractAddress(address referralsContractAddress);
 
-    event Payout(address _to, uint256 _amount);
-    event Credited(address _from, uint256 _amount);
+    event Buy(address indexed tokenAddress, address indexed user, uint256 amount, uint256 price);
+    event Refund(address indexed tokenAddress, address indexed user, uint256 amount, uint256 price);
+    event Claim(address indexed tokenAddress, address indexed user, uint256 amount, uint256 price);
+
+    event Payout(address to, uint256 amount);
+    event Credited(address from, uint256 amount);
 
     modifier isTokenPresent(address _tokenAddress, bool _bool) {
         Structs.Token memory _token = tokens[_tokenAddress];
@@ -75,17 +88,23 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         _;
     }
 
-    /** @dev Initialez contract
+    /** @dev Initializes contract
      */
-    constructor(IERC20 _token, address _referralsContractAddress) {
+    constructor(IERC20 _token, address _referralsContractAddress, address _validatorContractAddress) {
         token = _token;
+
         referralsContract = ReferralsContractInterface(
             _referralsContractAddress
         );
         referralsContractAddress = _referralsContractAddress;
+
+        validatorContract = ValidatorContractInterface(
+            _validatorContractAddress
+        );
+        validatorContractAddress = _validatorContractAddress;
     }
 
-    /** @dev Main function to play a game
+    /** @dev Buy tokens
      * @param _tokenAddress address of the buying token.
      * @param _amount amount of usdt.
      */
@@ -103,8 +122,6 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         Structs.Token memory _token = tokens[_tokenAddress];
 
         uint256 _amountToBuy = _token.price * _amount;
-        (bool _bool, ) = SafeMath.trySub(_token.available, _amountToBuy);
-        require(_bool, "Not enough funds on the contract");
 
         token.safeTransferFrom(msg.sender, address(this), _amount);
 
@@ -116,11 +133,15 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         sendReferrals(_amount, msg.sender);
         checkTokensAreCollected(_tokenAddress);
 
-        emit Buy(msg.sender, _amount, _token.price);
+        emit Buy(_tokenAddress, msg.sender, _amount, _token.price);
 
         // send referrals, check for collected
     }
 
+    /** @dev Refund tokens if amount not collected
+     * @param _tokenAddress address of the buying token.
+     * @param _amount amount of usdt.
+     */
     function refund(address _tokenAddress, uint256 _amount)
         public
         isTokenActive(_tokenAddress, false)
@@ -139,9 +160,13 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         token.safeTransfer(msg.sender, _amountToReturn);
 
 
-        emit Refund(msg.sender, _amount, _token.price);
+        emit Refund(_tokenAddress, msg.sender, _amount, _token.price);
     }
 
+    /** @dev Claim tokens
+     * @param _tokenAddress address of the buying token.
+     * @param _amount amount of usdt.
+     */
     function claim(address _tokenAddress, uint256 _amount)
         public
         isTokenActive(_tokenAddress, true)
@@ -161,7 +186,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         tokens[_tokenAddress].sold -= _amountToReturn;
         token.safeTransfer(msg.sender, _amountToReturn);
 
-        emit Claim(msg.sender, _amount, _token.price);
+        emit Claim(_tokenAddress, msg.sender, _amount, _token.price);
     }
 
     /** @dev Create token
@@ -177,7 +202,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _token.price == uint256(0) ||
             _token.claimTimestamp < block.timestamp ||
             _token.available == uint256(0) ||
-            IERC20(_tokenAddress).totalSupply() > _token.available ||
+            IERC20(_tokenAddress).totalSupply() != _token.available + _token.sold ||
             _token.lastCallTimestamp < block.timestamp ||
             _token.claimTimestamp < _token.lastCallTimestamp ||
             _token.claimTimestampLimit < _token.claimTimestamp
@@ -189,7 +214,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _token.claimTimestamp,
             _token.claimTimestampLimit,
             _token.available,
-            uint256(0),
+            _token.sold,
             _token.lastCallTimestamp,
             block.timestamp,
             uint256(0),
@@ -197,6 +222,11 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _token.isPaused,
             _token.isCollected
         );
+        if (_token.isCollected) {
+            TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
+            _tokenContract.notPausable();
+        }
+        validatorContract.createToken(_tokenAddress);
         tokens[_tokenAddress] = _tokenFinal;
         emit TokenAdded(_tokenFinal);
     }
@@ -217,7 +247,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             (_token.claimTimestamp != _updatingToken.claimTimestamp &&
                 _token.claimTimestamp < block.timestamp) ||
             _token.available == uint256(0) ||
-            IERC20(_tokenAddress).totalSupply() > _token.available ||
+            IERC20(_tokenAddress).totalSupply() != _token.available + _token.sold ||
             (_token.lastCallTimestamp != _updatingToken.lastCallTimestamp &&
                 _token.lastCallTimestamp < block.timestamp) ||
             _token.claimTimestamp < _token.lastCallTimestamp ||
@@ -235,7 +265,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _token.claimTimestamp,
             _token.claimTimestampLimit,
             _token.available,
-            _updatingToken.sold,
+            _token.sold,
             _token.lastCallTimestamp,
             _updatingToken.createdTimestamp,
             _updatingToken.closedTimestamp,
@@ -243,6 +273,11 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _token.isPaused,
             _token.isCollected
         );
+        if (_token.isCollected) {
+            TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
+            _tokenContract.notPausable();
+        }
+        validatorContract.updateTokenPaused(_tokenAddress, _token.isPaused);
         tokens[_tokenAddress] = _tokenFinal;
         emit TokenUpdated(_tokenFinal);
     }
@@ -262,6 +297,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             "Some of tokens are already sold. Cannot be deleted"
         );
 
+        validatorContract.deleteToken(_tokenAddress);
         delete tokens[_tokenAddress];
         emit TokenDeleted(_tokenAddress);
     }
@@ -283,6 +319,10 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
 
         tokens[_tokenAddress].isActive = false;
         tokens[_tokenAddress].closedTimestamp = block.timestamp;
+
+        TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
+        _tokenContract.notPausable();
+
         emit TokenClosed(_tokenAddress);
     }
 
@@ -322,15 +362,19 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
     function sendReferrals(uint256 _usdAmount, address _caller) internal {
         uint256 _referralFeeAmount = referralsContract
             .calculateReferralFatherFee(_usdAmount, _caller);
-        referralsContract.addReferralFatherFee(
-            _referralFeeAmount,
-            _caller
-        );
+        if (_referralFeeAmount != uint256(0)) {
+            referralsContract.addReferralFatherFee(
+                _referralFeeAmount,
+                _caller
+            );
+        }
     }
 
     function checkTokensAreCollected(address _tokenAddress) internal {
         if (tokens[_tokenAddress].available == uint256(0)) {
             tokens[_tokenAddress].isCollected = true;
+            TSCoinContract _token = TSCoinContract(_tokenAddress);
+            _token.notPausable();
         }
     }
 
@@ -339,9 +383,15 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         // If token either collected, or not collected and lastCallTimestamp not passed
         // Token not collected and lastCallTimestamp passed
         if (!_token.isCollected && _token.lastCallTimestamp < block.timestamp) {
+
             tokens[_tokenAddress].isActive = false;
             tokens[_tokenAddress].closedTimestamp = block.timestamp;
+
+            TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
+            _tokenContract.notPausable();
+
             emit TokenClosed(_tokenAddress);
+
             return false;
         }
         return true;

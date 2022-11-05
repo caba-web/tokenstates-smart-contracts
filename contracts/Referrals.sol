@@ -3,7 +3,6 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./ERC20/utils/SafeERC20.sol";
 
@@ -45,6 +44,8 @@ contract Referrals is Ownable, ReentrancyGuard {
 
     uint256 public constant STORAGE_ADD_REFERRAL_DATA = 1;
     uint32 public constant MAX_REFERRAL_PERCENT = 5_000;
+    uint256 public constant REFERRAL_MULTIPLIER = 500;
+
     address public helperAccount;
     address public rootCaller;
 
@@ -258,7 +259,7 @@ contract Referrals is Ownable, ReentrancyGuard {
         uint32 fatherReferralLevel = fatherReferralMapping[fatherReferral]
             .level;
         uint32 levelPercent = referralLevelsAndPercents[fatherReferralLevel];
-        uint256 newAmount = (_amount * levelPercent) / 10_000;
+        uint256 newAmount = (_amount * levelPercent * REFERRAL_MULTIPLIER) / 1_000_000;
         return newAmount;
     }
 
