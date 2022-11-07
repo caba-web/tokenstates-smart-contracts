@@ -11,9 +11,6 @@ library Structs {
         uint32 level;
         uint32 percent;
     }
-    struct ReferralChildData {
-        address fatherReferral;
-    }
     struct ReferralFatherData {
         address childReferral;
     }
@@ -60,7 +57,6 @@ contract Referrals is Ownable, ReentrancyGuard {
 
     // Events
     event StorageReferralDeposit(address indexed fatherReferral, uint32 newLevel);
-    event StorageReferralDepositAdmin(Structs.StorageReferralDeposit[]);
     event AddNewChildReferralToFather(Structs.AddNewChildReferralToFather[]);
     event UpdateLevelReferralFather(Structs.UpdateLevelReferralFather[]);
     event NewReferralPayout(
@@ -68,7 +64,9 @@ contract Referrals is Ownable, ReentrancyGuard {
         address childReferral,
         uint256 amount
     );
+
     event Payout(address to, uint256 amount);
+    event PayoutERC20(address tokenAddress, address to, uint256 amount);
     event Credited(address user, uint256 amount);
 
     modifier onlyOwnerOrHelperAccount() {
@@ -97,7 +95,7 @@ contract Referrals is Ownable, ReentrancyGuard {
         address _helperAccount
     ) {
         token = _token;
-        prepareAndUpdateReferralLevelsAndPercents(_referralLevelsAndPercents);
+        _prepareAndUpdateReferralLevelsAndPercents(_referralLevelsAndPercents);
         rootCaller = _rootCaller;
         helperAccount = _helperAccount;
     }
@@ -151,35 +149,6 @@ contract Referrals is Ownable, ReentrancyGuard {
             _returnData[i] = Structs.AddNewChildReferralToFather(fatherReferral, childReferral);
         }
         emit AddNewChildReferralToFather(_returnData);
-    }
-
-    function storageReferralDepositAdmin(address[] memory _data)
-        public
-        onlyOwnerOrHelperAccount
-    {
-        Structs.StorageReferralDeposit[] memory _returnData = new Structs.StorageReferralDeposit[]( _data.length);
-        for (uint256 i = 0; i < _data.length; i++) {
-            address fatherReferral = _data[i];
-            require(
-                !fatherReferralMapping[fatherReferral].isPresent,
-                "Father Referral already exists"
-            );
-            fatherReferralMapping[fatherReferral].isPresent = true;
-            uint32 smallest = 100000;
-            for (
-                uint256 ii = 0;
-                ii < keyListReferralLevelsAndPercents.length;
-                ii++
-            ) {
-                if (keyListReferralLevelsAndPercents[ii] < smallest) {
-                    smallest = keyListReferralLevelsAndPercents[ii];
-                }
-            }
-            uint32 referralLevel = smallest;
-            fatherReferralMapping[fatherReferral].level = referralLevel;
-            _returnData[i] = Structs.StorageReferralDeposit(fatherReferral, referralLevel);
-        }
-        emit StorageReferralDepositAdmin(_returnData);
     }
 
     function updateLevelReferralFather(
@@ -236,6 +205,19 @@ contract Referrals is Ownable, ReentrancyGuard {
         emit Payout(msg.sender, _amount);
     }
 
+    /** @dev withdraws value from contract.
+     * @param _tokenAddress *
+     * @param _amount *
+     */
+    function withdrawERC20(address _tokenAddress, uint256 _amount)
+        public
+        onlyOwner
+    {
+        IERC20 _token = IERC20(_tokenAddress);
+        _token.safeTransfer(msg.sender, _amount);
+        emit PayoutERC20(_tokenAddress, msg.sender, _amount);
+    }
+
     function setNewRootCaller(address _newRootCaller) public onlyOwner {
         rootCaller = _newRootCaller;
     }
@@ -263,14 +245,14 @@ contract Referrals is Ownable, ReentrancyGuard {
         return newAmount;
     }
 
-    function prepareAndUpdateReferralLevelsAndPercents(
+    function _prepareAndUpdateReferralLevelsAndPercents(
         Structs.ReferralLevelsAndPercentsStruct[]
-            memory newReferralLevelsAndPercents
+            memory _newReferralLevelsAndPercents
     ) internal {
         // Check if percents in new levels not higher fixed
-        for (uint256 i = 0; i < newReferralLevelsAndPercents.length; i++) {
+        for (uint256 i = 0; i < _newReferralLevelsAndPercents.length; i++) {
             require(
-                newReferralLevelsAndPercents[i].percent <= MAX_REFERRAL_PERCENT,
+                _newReferralLevelsAndPercents[i].percent <= MAX_REFERRAL_PERCENT,
                 string(
                     abi.encodePacked(
                         "Requires maximum referral percent of ",
@@ -280,20 +262,20 @@ contract Referrals is Ownable, ReentrancyGuard {
             );
         }
         // Update new referral levels and percents
-        for (uint256 i = 0; i < newReferralLevelsAndPercents.length; i++) {
+        for (uint256 i = 0; i < _newReferralLevelsAndPercents.length; i++) {
             referralLevelsAndPercents[
-                newReferralLevelsAndPercents[i].level
-            ] = newReferralLevelsAndPercents[i].percent;
+                _newReferralLevelsAndPercents[i].level
+            ] = _newReferralLevelsAndPercents[i].percent;
             if (
                 !keyListReferralLevelsAndPercentsExists[
-                    newReferralLevelsAndPercents[i].level
+                    _newReferralLevelsAndPercents[i].level
                 ]
             ) {
                 keyListReferralLevelsAndPercentsExists[
-                    newReferralLevelsAndPercents[i].level
+                    _newReferralLevelsAndPercents[i].level
                 ] = true;
                 keyListReferralLevelsAndPercents.push(
-                    newReferralLevelsAndPercents[i].level
+                    _newReferralLevelsAndPercents[i].level
                 );
             }
         }

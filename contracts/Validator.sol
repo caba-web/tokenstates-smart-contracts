@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "./ERC20/utils/SafeERC20.sol";
 import "./utils/datetime/BokkyPooBahsDateTimeLibrary.sol";
+import "hardhat/console.sol";
 
 library Structs {
     struct PayoutBonds {
@@ -76,9 +77,24 @@ contract Validator is Ownable, ReentrancyGuard {
     event TokenDeleted(address tokenAddress);
     event UpdateProxyRouterContractAddress(address proxyRouterContractAddress);
 
-    event Locked(address tokenAddress, address user, uint256 amount, uint256 timestamp);
-    event Unlocked(address tokenAddress, address user, uint256 amount, uint256 timestamp);
-    event Claimed(address tokenAddress, address user, uint256 amount, uint256 timestamp);
+    event Locked(
+        address tokenAddress,
+        address user,
+        uint256 amount,
+        uint256 timestamp
+    );
+    event Unlocked(
+        address tokenAddress,
+        address user,
+        uint256 amount,
+        uint256 timestamp
+    );
+    event Claimed(
+        address tokenAddress,
+        address user,
+        uint256 amount,
+        uint256 timestamp
+    );
 
     event Payout(address to, uint256 amount);
     event Credited(address from, uint256 amount);
@@ -312,6 +328,10 @@ contract Validator is Ownable, ReentrancyGuard {
         }
     }
 
+    function getWRequest(address _tokenAddress, address _user, uint256 _index) public view returns (Structs.LockedTokensSecondary memory) {
+        return userTokens[_tokenAddress][_user].otherTokens[_index];
+    }
+
     function _lock(
         address _tokenAddress,
         address _from,
@@ -325,11 +345,15 @@ contract Validator is Ownable, ReentrancyGuard {
             _from
         ];
         if (_userTokens.initLocked == uint256(0)) {
-            _userTokens.initLocked = _amount;
-            _userTokens.initTimeCreate = newDate(block.timestamp);
-            _userTokens.lastCalculationTimestamp = newDate(block.timestamp);
+            userTokens[_tokenAddress][_from].initLocked = _amount;
+            userTokens[_tokenAddress][_from].initTimeCreate = newDate(
+                block.timestamp
+            );
+            userTokens[_tokenAddress][_from].lastCalculationTimestamp = newDate(
+                block.timestamp
+            );
         } else if (_userTokens.initTimeCreate == newDate(block.timestamp)) {
-            _userTokens.initLocked += _amount;
+            userTokens[_tokenAddress][_from].initLocked += _amount;
         } else {
             addOtherTokens(_tokenAddress, _from, _amount);
         }
@@ -377,7 +401,7 @@ contract Validator is Ownable, ReentrancyGuard {
         _userTokens = userTokens[_tokenAddress][_user];
         Structs.Token storage _token = tokens[_tokenAddress];
 
-        uint _deleted;
+        uint256 _deleted;
 
         if (_userTokens.lastCalculationTimestamp < block.timestamp) {
             return;
@@ -483,7 +507,7 @@ contract Validator is Ownable, ReentrancyGuard {
     function recalculateMonths(address _tokenAddress, address _user) internal {
         // push other tokens to init if month > 6
 
-        uint _deleted;
+        uint256 _deleted;
 
         Structs.LockedTokens memory _userTokens = userTokens[_tokenAddress][
             _user
@@ -507,28 +531,40 @@ contract Validator is Ownable, ReentrancyGuard {
         }
     }
 
-    function unlock(address _tokenAddress, address _user, uint256 _amount) internal {
+    function unlock(
+        address _tokenAddress,
+        address _user,
+        uint256 _amount
+    ) internal {
         Structs.LockedTokens memory _userTokens = userTokens[_tokenAddress][
             _user
         ];
 
-        uint _deleted;
+        uint256 _deleted;
 
         // array is limited to 6 elems
         for (uint256 i = _userTokens.otherTokens.length; i > 0; i--) {
-            (bool _success, ) = SafeMath.trySub(_userTokens.otherTokens[i - 1].amount, _amount);
+            (bool _success, ) = SafeMath.trySub(
+                _userTokens.otherTokens[i - 1].amount,
+                _amount
+            );
             if (_success) {
-                userTokens[_tokenAddress][_user].otherTokens[i - 1].amount -= _amount;
+                userTokens[_tokenAddress][_user]
+                    .otherTokens[i - 1]
+                    .amount -= _amount;
                 return;
             }
             userTokens[_tokenAddress][_user].otherTokens[i - 1] = _userTokens
-                    .otherTokens[_userTokens.otherTokens.length - 1 - _deleted];
+                .otherTokens[_userTokens.otherTokens.length - 1 - _deleted];
             userTokens[_tokenAddress][_user].otherTokens.pop();
             _amount -= _userTokens.otherTokens[i - 1].amount;
             _deleted++;
         }
-        
-        (bool __success, uint256 _newAmount) = SafeMath.trySub(_userTokens.initLocked, _amount);
+
+        (bool __success, uint256 _newAmount) = SafeMath.trySub(
+            _userTokens.initLocked,
+            _amount
+        );
         require(__success, "Amount is too big");
 
         userTokens[_tokenAddress][_user].initLocked = _newAmount;

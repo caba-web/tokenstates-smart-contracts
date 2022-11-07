@@ -36,13 +36,15 @@ contract TestSeller is Ownable, ReentrancyGuard {
         emit Receive(msg.sender, _amount);
     }
 
-    function onTokenTransfer(
+    function onTokenApproval(
         address _from,
         uint256 _amount,
         bytes calldata _extraData
     ) public nonReentrant {
         require(msg.sender == tokenAddress);
         require(_extraData.length == 32);
+
+        IERC20(msg.sender).safeTransferFrom(_from, address(this), _amount);
 
         uint64 _functionId = abi.decode(_extraData, (uint64));
 

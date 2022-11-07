@@ -1,9 +1,11 @@
 //SPDX-License-Identifier: Unlicense
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "./ERC20/utils/SafeERC20.sol";
 import "./utils/datetime/BokkyPooBahsDateTimeLibrary.sol";
 
@@ -48,11 +50,14 @@ interface ProxyRouterContractInterface {
     function tokens(address _tokenAddress) external view;
 }
 
-contract Validator is Ownable, ReentrancyGuard {
+contract ValidatorUpgradeable is Initializable,
+    UUPSUpgradeable,
+    OwnableUpgradeable,
+    ReentrancyGuardUpgradeable {
     using SafeERC20 for IERC20;
     using BokkyPooBahsDateTimeLibrary for uint256;
 
-    IERC20 public immutable token; // usdt token.
+    IERC20 public token; // usdt token.
 
     ProxyRouterContractInterface internal proxyRouterContract;
 
@@ -114,13 +119,16 @@ contract Validator is Ownable, ReentrancyGuard {
 
     /** @dev Initializes contract
      */
-    constructor(IERC20 _token, address _proxyRouterContractAddress) {
+    function initialize(IERC20 _token, address _proxyRouterContractAddress) public payable initializer {
         token = _token;
         proxyRouterContract = ProxyRouterContractInterface(
             _proxyRouterContractAddress
         );
         proxyRouterContractAddress = _proxyRouterContractAddress;
     }
+
+    ///@dev required by the OZ UUPS module
+    function _authorizeUpgrade(address) internal override onlyOwner {}
 
     /** @dev Locks tokens. Receives earnings
      * @param _tokenAddress address of the buying token.
@@ -516,7 +524,7 @@ contract Validator is Ownable, ReentrancyGuard {
 
         // array is limited to 6 elems
         for (uint256 i = _userTokens.otherTokens.length; i > 0; i--) {
-            (bool _success, ) = SafeMath.trySub(_userTokens.otherTokens[i - 1].amount, _amount);
+            (bool _success, ) = SafeMathUpgradeable.trySub(_userTokens.otherTokens[i - 1].amount, _amount);
             if (_success) {
                 userTokens[_tokenAddress][_user].otherTokens[i - 1].amount -= _amount;
                 return;
@@ -528,7 +536,7 @@ contract Validator is Ownable, ReentrancyGuard {
             _deleted++;
         }
         
-        (bool __success, uint256 _newAmount) = SafeMath.trySub(_userTokens.initLocked, _amount);
+        (bool __success, uint256 _newAmount) = SafeMathUpgradeable.trySub(_userTokens.initLocked, _amount);
         require(__success, "Amount is too big");
 
         userTokens[_tokenAddress][_user].initLocked = _newAmount;

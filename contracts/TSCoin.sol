@@ -102,8 +102,8 @@ abstract contract ERC20PausableAndBurnable is ERC20Burnable, Pausable {
     }
 }
 
-interface TransferAndCallFallBack {
-    function onTokenTransfer(
+interface ApproveAndCallFallBack {
+    function onTokenApproval(
         address from,
         uint256 amount,
         bytes calldata extraData
@@ -134,15 +134,15 @@ contract TSCoin is ERC20PausableAndBurnable {
     /**
      * @dev Approves amount of tokens and calls external functions
      **/
-    function transferAndCall(
+    function approveAndCall(
         address _to,
         uint256 _amount,
         bytes memory extraData
     ) public returns (bool) {
-        require(transfer(_to, _amount));
+        require(approve(_to, _amount));
 
         if (isContract(_to)) {
-            TransferAndCallFallBack(_to).onTokenTransfer(
+            ApproveAndCallFallBack(_to).onTokenApproval(
                 msg.sender,
                 _amount,
                 extraData

@@ -223,16 +223,15 @@ describe("TSCoin", function () {
 		await expect(tsCoin.transfer(user3.address, ethers.utils.parseEther("0.00000000002")))
 		.to.emit(tsCoin, "Transfer").withArgs(owner.address, user3.address, ethers.utils.parseEther("0.00000000002"))
 
-		await expect(tsCoin.connect(user3).transferAndCall(testSeller.address, ethers.utils.parseEther("0.000000000005"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+		await expect(tsCoin.connect(user3).approveAndCall(testSeller.address, ethers.utils.parseEther("0.000000000005"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
 		.to.emit(testSeller, "Receive").withArgs(user3.address, ethers.utils.parseEther("0.000000000005"));
 		
 		await expect(tsCoin.connect(user3).approve(testSeller.address, ethers.utils.parseEther("0.000000000005")))
 		.to.emit(tsCoin, "Approval").withArgs(user3.address, testSeller.address, ethers.utils.parseEther("0.000000000005"));
 		
 		await expect(testSeller.connect(user3).receiveTest(ethers.utils.parseEther("0.000000000005")))
-		.to.emit(testSeller, "Receive").withArgs(user3.address, ethers.utils.parseEther("0.000000000005"));
-
-		console.log(await tsCoin.balanceOf(testSeller.address));
+		.to.emit(testSeller, "Receive").withArgs(user3.address, ethers.utils.parseEther("0.000000000005"))
+		.to.emit(tsCoin, "Transfer").withArgs(user3.address, testSeller.address, ethers.utils.parseEther("0.000000000005"));
 		
 	});
 

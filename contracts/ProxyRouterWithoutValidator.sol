@@ -54,7 +54,7 @@ interface TSCoinContract {
     function decimals() external view returns(uint8);
 }
 
-contract ProxyRouter is Ownable, ReentrancyGuard {
+contract ProxyRouterWithoutValidator is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable token; // usdt token.
@@ -269,7 +269,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
             _tokenContract.notPausable();
         }
-        validatorContract.createToken(_tokenAddress);
+        // validatorContract.createToken(_tokenAddress);
         tokens[_tokenAddress] = _tokenFinal;
         emit TokenAdded(_tokenFinal);
     }
@@ -321,7 +321,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
             _tokenContract.notPausable();
         }
-        validatorContract.updateTokenPaused(_tokenAddress, _token.isPaused);
+        // validatorContract.updateTokenPaused(_tokenAddress, _token.isPaused);
         tokens[_tokenAddress] = _tokenFinal;
         emit TokenUpdated(_tokenFinal);
     }
@@ -341,7 +341,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             "Some of tokens are already sold. Cannot be deleted"
         );
 
-        validatorContract.deleteToken(_tokenAddress);
+        // validatorContract.deleteToken(_tokenAddress);
         delete tokens[_tokenAddress];
         emit TokenDeleted(_tokenAddress);
     }

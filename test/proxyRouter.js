@@ -10,7 +10,7 @@ describe("ProxyRouter", function () {
 	beforeEach(async () => {
 		await network.provider.send("hardhat_reset");
 		[owner, user1, user2, user3] = await ethers.getSigners();
-		ProxyRouter = await ethers.getContractFactory("ProxyRouter");
+		ProxyRouter = await ethers.getContractFactory("ProxyRouterWithoutValidator");
 		proxyRouter = await ProxyRouter.deploy(
 			...[
 				"0x0000000000000000000000000000000000000000",
@@ -68,7 +68,7 @@ describe("ProxyRouter", function () {
 
 		expect((await proxyRouter.tokens(tsCoin.address)).price).to.equal(50);
 		expect((await proxyRouter.tokens(tsCoin.address)).claimTimestamp).to.equal(1767801720);
-		expect((await proxyRouter.tokens(tsCoin.address)).claimTimestampLimit).to.equal(1777801720);
+		expect((await proxyRouter.tokens(tsCoin.address)).limitTimestamp).to.equal(1777801720);
 		expect((await proxyRouter.tokens(tsCoin.address)).available).to.equal(20000 * 10 ** 7);
 		expect((await proxyRouter.tokens(tsCoin.address)).sold).to.equal(0);
 		expect((await proxyRouter.tokens(tsCoin.address)).lastCallTimestamp).to.equal(1757801720);
@@ -210,7 +210,7 @@ describe("ProxyRouter", function () {
 			}
 		}
 
-		// claimTimestampLimit < claimTimestamp
+		// limitTimestamp < claimTimestamp
 		try {
 			await expect(proxyRouter.createToken(tsCoin.address, [
 				50, 1777801720, 1767801720, 20000 * 10 ** 7, 0,
@@ -242,18 +242,18 @@ describe("ProxyRouter", function () {
 			]);
 
 		await expect(proxyRouter.updateToken(tsCoin.address, [
-			150, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+			50, 1767801721, 1777801720, 20000 * 10 ** 7, 0,
 			1757801720, 0, 0, true, false, false
 		]))
 			.to.emit(proxyRouter, "TokenUpdated").withArgs([
-				150, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+				50, 1767801721, 1777801720, 20000 * 10 ** 7, 0,
 				1757801720, timestampBefore + 1, 0, true, false, false
 			]);
 
 
-		expect((await proxyRouter.tokens(tsCoin.address)).price).to.equal(150);
-		expect((await proxyRouter.tokens(tsCoin.address)).claimTimestamp).to.equal(1767801720);
-		expect((await proxyRouter.tokens(tsCoin.address)).claimTimestampLimit).to.equal(1777801720);
+		expect((await proxyRouter.tokens(tsCoin.address)).price).to.equal(50);
+		expect((await proxyRouter.tokens(tsCoin.address)).claimTimestamp).to.equal(1767801721);
+		expect((await proxyRouter.tokens(tsCoin.address)).limitTimestamp).to.equal(1777801720);
 		expect((await proxyRouter.tokens(tsCoin.address)).available).to.equal(20000 * 10 ** 7);
 		expect((await proxyRouter.tokens(tsCoin.address)).sold).to.equal(0);
 		expect((await proxyRouter.tokens(tsCoin.address)).lastCallTimestamp).to.equal(1757801720);
@@ -303,11 +303,11 @@ describe("ProxyRouter", function () {
 		// price == uint256(0)
 		try {
 			await expect(proxyRouter.updateToken(tsCoin.address, [
-				0, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+				50, 0, 1777801720, 20000 * 10 ** 7, 0,
 				1757801720, 0, 0, true, false, false
 			]))
 				.to.emit(proxyRouter, "TokenUpdated").withArgs([
-					0, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+					50, 0, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
 		} catch (err) {
@@ -424,7 +424,7 @@ describe("ProxyRouter", function () {
 		expect((await proxyRouter.tokens(tsCoin.address)).isCollected).to.equal(true);
 
 
-		// claimTimestampLimit < claimTimestamp
+		// limitTimestamp < claimTimestamp
 		try {
 			await expect(proxyRouter.updateToken(tsCoin.address, [
 				50, 1777801720, 1767801720, 20000 * 10 ** 7, 0,
@@ -621,7 +621,7 @@ describe("ProxyRouter", function () {
 
 	});
 
-	it("should check update claimTimestampLimit in a ProxyRouter", async function () {
+	it("should check update limitTimestamp in a ProxyRouter", async function () {
 		const blockNumBefore = await ethers.provider.getBlockNumber();
 		const blockBefore = await ethers.provider.getBlock(blockNumBefore);
 		const timestampBefore = blockBefore.timestamp;
@@ -731,7 +731,7 @@ describe("ProxyRouter", function () {
 
 		expect((await proxyRouter.tokens(tsCoin.address)).price).to.equal(0);
 		expect((await proxyRouter.tokens(tsCoin.address)).claimTimestamp).to.equal(0);
-		expect((await proxyRouter.tokens(tsCoin.address)).claimTimestampLimit).to.equal(0);
+		expect((await proxyRouter.tokens(tsCoin.address)).limitTimestamp).to.equal(0);
 		expect((await proxyRouter.tokens(tsCoin.address)).available).to.equal(0);
 		expect((await proxyRouter.tokens(tsCoin.address)).sold).to.equal(0);
 		expect((await proxyRouter.tokens(tsCoin.address)).lastCallTimestamp).to.equal(0);
@@ -816,6 +816,23 @@ describe("ProxyRouter", function () {
 
 	});
 
+	it("should update validatorContractAddress in ProxyRouter", async function () {
+		const Validator = await ethers.getContractFactory("Validator");
+		const validator = await Validator.deploy(
+			...[
+				"0x0000000000000000000000000000000000000000",
+                proxyRouter.address
+			]
+		);
+		await validator.deployed();
+
+		await expect(proxyRouter.updateValidatorContractAddress(validator.address))
+			.to.emit(proxyRouter, "UpdateValidatorContractAddress").withArgs(validator.address);
+
+		expect((await proxyRouter.validatorContractAddress())).to.equal(validator.address);
+
+	});
+
 	it("should allow to withdraw from ProxyRouter", async function () {
 		const provider = waffle.provider;
 
@@ -857,12 +874,10 @@ describe("ProxyRouter", function () {
 
 	});
 
-	it("should panic if onTokenTransfer called not by token in ProxyRouter", async function () {
+	it("should panic if onTokenApproval called not by token in ProxyRouter", async function () {
 		try {
-			await expect(proxyRouter.onTokenTransfer(owner.address, 2000, 1)).to.emit(proxyRouter, "PayoutERC20");
-			console.log(1212);
+			await expect(proxyRouter.onTokenApproval(owner.address, 2000, 1)).to.emit(proxyRouter, "PayoutERC20");
 		} catch (err) {
-			console.log(err);
 			if (err.toString() === "Error: Transaction reverted without a reason string") {
 				return;
 			}
@@ -871,5 +886,14 @@ describe("ProxyRouter", function () {
 
 	});
 
-
+	it("should panic if _buy called not by ProxyRouter in ProxyRouter", async function () {
+		try {
+			await expect(proxyRouter._buy(tsCoin.address, owner.address, 2000)).to.emit(proxyRouter, "PayoutERC20");
+		} catch (err) {
+			if (err.toString() === "Error: VM Exception while processing transaction: reverted with reason string 'Ownable: caller is not the proxyRouter'") {
+				return;
+			}
+		}
+		throw new Error();
+	});
 });

@@ -58,10 +58,10 @@ module.exports = {
     }
   },
   paths: {
-    sources: "./upgradable/contracts",
-    tests: "./upgradable/test",
-    // sources: "./contracts",
-    // tests: "./test",
+    // sources: "./upgradable/contracts",
+    // tests: "./upgradable/test",
+    sources: "./contracts",
+    tests: "./test",
     cache: "./cache",
     artifacts: "./artifacts",
   },
