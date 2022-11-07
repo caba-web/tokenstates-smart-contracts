@@ -5,8 +5,8 @@ import "@openzeppelin/contracts-upgradeable/utils/StringsUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "./ERC20/utils/SafeERC20.sol";
 
 library Structs {
     struct ReferralLevelsAndPercentsStruct {
@@ -22,48 +22,56 @@ library Structs {
     struct ReferralFatherDataInternal {
         bool isPresent;
         uint32 level;
-        uint256 profit;
-        uint256 earned;
-        uint32 percentForAdmin;
+        uint256 availableForClaim;
+        uint256 totalProfit;
     }
-        struct AddNewChildReferralToFather {
-        address childReferral;
+    struct AddNewChildReferralToFather {
         address fatherReferral;
+        address childReferral;
     }
     struct UpdateLevelReferralFather {
         address fatherReferral;
         uint32 newLevel;
     }
+    struct StorageReferralDeposit{
+        address fatherReferral;
+        uint32 newLevel;
+    }
 }
 
-contract ReferralsUpgradable is Initializable, UUPSUpgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
+contract ReferralsUpgradable is Initializable,
+    UUPSUpgradeable,
+    OwnableUpgradeable,
+    ReentrancyGuardUpgradeable {
+    using SafeERC20 for IERC20;
+
+    IERC20 public token; // tokenstates token.
+
     uint256 public constant STORAGE_ADD_REFERRAL_DATA = 1;
-    uint32 public constant MAX_REFRRAL_PERCENT = 5_000;
+    uint32 public constant MAX_REFERRAL_PERCENT = 5_000;
+    uint256 public constant REFERRAL_MULTIPLIER = 500;
+
     address public helperAccount;
     address public rootCaller;
 
     mapping(address => Structs.ReferralFatherDataInternal)
         public fatherReferralMapping;
-    mapping(address => Structs.ReferralFatherData[]) public fatherReferralChildren;
+    mapping(address => Structs.ReferralFatherData[])
+        public fatherReferralChildren;
     mapping(address => address) public fatherReferralByChild;
-    mapping(uint32 => uint32) public referralLevelsAndPercents; 
+    mapping(uint32 => uint32) public referralLevelsAndPercents;
     mapping(uint32 => bool) internal keyListReferralLevelsAndPercentsExists;
     uint32[] internal keyListReferralLevelsAndPercents;
 
     // Events
-    event StorageReferralDeposit(address fatherReferral, uint32 newLevel);
-    event AddNewChildReferralToFather(
-        address fatherReferral,
-        address childReferral
-    );
-    event UpdateLevelReferralFather(address fatherReferral, uint32 newLevel);
-    event UpdatePercentReferralAdmin(address fatherReferral, uint32 newPercent);
+    event StorageReferralDeposit(address indexed fatherReferral, uint32 newLevel);
+    event StorageReferralDepositAdmin(Structs.StorageReferralDeposit[]);
+    event AddNewChildReferralToFather(Structs.AddNewChildReferralToFather[]);
+    event UpdateLevelReferralFather(Structs.UpdateLevelReferralFather[]);
     event NewReferralPayout(
         address fatherReferral,
         address childReferral,
-        uint256 sentAmount,
-        uint256 amount,
-        uint256 indexed txIdentifier
+        uint256 amount
     );
     event Payout(address to, uint256 amount);
     event Credited(address user, uint256 amount);
@@ -87,20 +95,19 @@ contract ReferralsUpgradable is Initializable, UUPSUpgradeable, OwnableUpgradeab
     /** @dev Creates a contract.
      */
     function initialize(
+        IERC20 _token, 
         Structs.ReferralLevelsAndPercentsStruct[]
             memory _referralLevelsAndPercents,
         address _rootCaller,
         address _helperAccount
-    ) public payable initializer {
-        prepareAndUpdateReferralLevelsAndPercents(
-            _referralLevelsAndPercents
-        );
-        __Ownable_init();
-        __ReentrancyGuard_init();
+    ) public payable initializer{
+        token = _token;
+        prepareAndUpdateReferralLevelsAndPercents(_referralLevelsAndPercents);
         rootCaller = _rootCaller;
         helperAccount = _helperAccount;
     }
 
+    
     ///@dev required by the OZ UUPS module
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
@@ -133,8 +140,8 @@ contract ReferralsUpgradable is Initializable, UUPSUpgradeable, OwnableUpgradeab
 
     function addNewChildReferralToFather(
         Structs.AddNewChildReferralToFather[] memory _data
-    ) public payable onlyOwnerOrHelperAccount {
-        assertOneYocto();
+    ) public onlyOwnerOrHelperAccount {
+        Structs.AddNewChildReferralToFather[] memory _returnData = new Structs.AddNewChildReferralToFather[]( _data.length);
         for (uint256 i = 0; i < _data.length; i++) {
             address childReferral = _data[i].childReferral;
             address fatherReferral = _data[i].fatherReferral;
@@ -150,19 +157,16 @@ contract ReferralsUpgradable is Initializable, UUPSUpgradeable, OwnableUpgradeab
                 Structs.ReferralFatherData(childReferral)
             );
             fatherReferralByChild[childReferral] = fatherReferral;
-            emit AddNewChildReferralToFather(
-                fatherReferral,
-                childReferral
-            );
+            _returnData[i] = Structs.AddNewChildReferralToFather(fatherReferral, childReferral);
         }
+        emit AddNewChildReferralToFather(_returnData);
     }
 
     function storageReferralDepositAdmin(address[] memory _data)
         public
-        payable
         onlyOwnerOrHelperAccount
     {
-        assertOneYocto();
+        Structs.StorageReferralDeposit[] memory _returnData = new Structs.StorageReferralDeposit[]( _data.length);
         for (uint256 i = 0; i < _data.length; i++) {
             address fatherReferral = _data[i];
             require(
@@ -182,14 +186,15 @@ contract ReferralsUpgradable is Initializable, UUPSUpgradeable, OwnableUpgradeab
             }
             uint32 referralLevel = smallest;
             fatherReferralMapping[fatherReferral].level = referralLevel;
-            emit StorageReferralDeposit(fatherReferral, referralLevel);
+            _returnData[i] = Structs.StorageReferralDeposit(fatherReferral, referralLevel);
         }
+        emit StorageReferralDepositAdmin(_returnData);
     }
 
     function updateLevelReferralFather(
         Structs.UpdateLevelReferralFather[] memory _data
-    ) public payable onlyOwnerOrHelperAccount {
-        assertOneYocto();
+    ) public onlyOwnerOrHelperAccount {
+        Structs.UpdateLevelReferralFather[] memory _returnData = new Structs.UpdateLevelReferralFather[]( _data.length);
         for (uint256 i = 0; i < _data.length; i++) {
             bool isPresent = false;
             address fatherReferral = _data[i].fatherReferral;
@@ -210,50 +215,26 @@ contract ReferralsUpgradable is Initializable, UUPSUpgradeable, OwnableUpgradeab
             }
             require(isPresent, "Level does not exist");
             fatherReferralMapping[fatherReferral].level = newLevel;
-            emit UpdateLevelReferralFather(fatherReferral, newLevel);
+            _returnData[i] = Structs.UpdateLevelReferralFather(fatherReferral, newLevel);
         }
+        emit UpdateLevelReferralFather(_returnData);
     }
 
-    function updatePercentReferralAdmin(
-        address fatherReferral,
-        uint32 newPercent
-    ) public payable onlyOwnerOrHelperAccount {
-        assertOneYocto();
-        require(
-            newPercent <= 10_000,
-            "Percent could not be higher than 10_000"
-        );
-        require(
-            fatherReferralMapping[fatherReferral].isPresent,
-            "Father referral does not exist"
-        );
-        fatherReferralMapping[fatherReferral].percentForAdmin = newPercent;
-        emit UpdatePercentReferralAdmin(fatherReferral, newPercent);
-    }
-
-    function addCalculatedFatherFee(address _childReferral, uint256 _amount, uint256 _txIdentifier)
-        public
-        payable
-        onlyOwnerOrProxyRouterAccount
-    {
+    function addReferralFatherFee(
+        address _childReferral,
+        uint256 _amount
+    ) public onlyOwnerOrProxyRouterAccount {
         address fatherReferral = fatherReferralByChild[_childReferral];
         require(fatherReferral != address(0), "Father not found");
-        fatherReferralMapping[fatherReferral].profit += msg.value;
-        fatherReferralMapping[fatherReferral].earned += msg.value;
-        emit NewReferralPayout(fatherReferral, _childReferral, _amount, msg.value, _txIdentifier);
+        token.safeTransfer(fatherReferral, _amount);
+        emit NewReferralPayout(
+            fatherReferral,
+            _childReferral,
+            _amount
+        );
     }
 
-    function withdrawReferralFather(uint256 _amount) public payable nonReentrant {
-        uint256 _newAmount = fatherReferralMapping[msg.sender].profit;
-        (bool _bool, ) = SafeMathUpgradeable.trySub(_newAmount, _amount);
-        require(_bool, "Amount to withdraw is bigger than account balance");
-        fatherReferralMapping[msg.sender].profit -= _amount;
-        (bool success, ) = msg.sender.call{value: _amount}("");
-        require(success, "Transfer failed");
-        emit Payout(msg.sender, _amount);
-    }
-
-    function withdraw(uint256 _amount) public payable onlyOwner {
+    function withdraw(uint256 _amount) public onlyOwner {
         uint256 balance = address(this).balance;
 
         require(_amount <= balance, "amount should be less than balance");
@@ -264,42 +245,30 @@ contract ReferralsUpgradable is Initializable, UUPSUpgradeable, OwnableUpgradeab
         emit Payout(msg.sender, _amount);
     }
 
-    function setNewRootCaller(address _newRootCaller)
-        public
-        payable
-        onlyOwner
-    {
-        assertOneYocto();
+    function setNewRootCaller(address _newRootCaller) public onlyOwner {
         rootCaller = _newRootCaller;
     }
 
     function setNewHelperAccount(address _newHelperAccount)
         public
-        payable
         onlyOwner
     {
-        assertOneYocto();
         helperAccount = _newHelperAccount;
     }
 
-    function calculateReferralFatherFee(
-        uint256 _amount,
-        address _childReferral
-    ) public view returns (uint256) {
+    function calculateReferralFatherFee(uint256 _amount, address _childReferral)
+        public
+        view
+        returns (uint256)
+    {
         address fatherReferral = fatherReferralByChild[_childReferral];
         if (fatherReferral == address(0)) {
             return 0;
         }
-        uint32 fatherReferralLevel = fatherReferralMapping[fatherReferral].level;
+        uint32 fatherReferralLevel = fatherReferralMapping[fatherReferral]
+            .level;
         uint32 levelPercent = referralLevelsAndPercents[fatherReferralLevel];
-        uint32 levelPercent2 = fatherReferralMapping[fatherReferral].percentForAdmin;
-        uint32 newLevelPercent;
-        if (levelPercent > levelPercent2) {
-            newLevelPercent = levelPercent;
-        } else {
-            newLevelPercent = levelPercent2;
-        }
-        uint256 newAmount = (_amount * newLevelPercent) / 10_000;
+        uint256 newAmount = (_amount * levelPercent * REFERRAL_MULTIPLIER) / 1_000_000;
         return newAmount;
     }
 
@@ -310,11 +279,11 @@ contract ReferralsUpgradable is Initializable, UUPSUpgradeable, OwnableUpgradeab
         // Check if percents in new levels not higher fixed
         for (uint256 i = 0; i < newReferralLevelsAndPercents.length; i++) {
             require(
-                newReferralLevelsAndPercents[i].percent <= MAX_REFRRAL_PERCENT,
+                newReferralLevelsAndPercents[i].percent <= MAX_REFERRAL_PERCENT,
                 string(
                     abi.encodePacked(
                         "Requires maximum referral percent of ",
-                        StringsUpgradeable.toString(MAX_REFRRAL_PERCENT)
+                        StringsUpgradeable.toString(MAX_REFERRAL_PERCENT)
                     )
                 )
             );
@@ -338,11 +307,7 @@ contract ReferralsUpgradable is Initializable, UUPSUpgradeable, OwnableUpgradeab
             }
         }
     }
-
-    function assertOneYocto() internal {
-        require(msg.value == 1, "Requires attached deposit of exactly 1 yocto");
-    }
-
+    
     receive() external payable {
         emit Credited(msg.sender, msg.value);
     }

@@ -1,13 +1,14 @@
 const { expect } = require("chai");
-const { ethers, waffle, upgrades } = require("hardhat");
+const { ethers, waffle, upgrades, network } = require("hardhat");
 const { toUtf8Bytes } = require("@ethersproject/strings"); 
 
 describe("TSCoin", function () {
-	let TSCoin, tsCoin, owner, user1;
+	let TSCoin, tsCoin, owner, user1, user2, user3;
 
 	this.timeout(0);
 
 	beforeEach(async () => {
+		await network.provider.send("hardhat_reset");
 		[owner, user1, user2, user3] =  await ethers.getSigners();
 		TSCoin = await ethers.getContractFactory("TSCoin");
 		tsCoin = await TSCoin.deploy(
@@ -223,6 +224,12 @@ describe("TSCoin", function () {
 		.to.emit(tsCoin, "Transfer").withArgs(owner.address, user3.address, ethers.utils.parseEther("0.00000000002"))
 
 		await expect(tsCoin.connect(user3).transferAndCall(testSeller.address, ethers.utils.parseEther("0.000000000005"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+		.to.emit(testSeller, "Receive").withArgs(user3.address, ethers.utils.parseEther("0.000000000005"));
+		
+		await expect(tsCoin.connect(user3).approve(testSeller.address, ethers.utils.parseEther("0.000000000005")))
+		.to.emit(tsCoin, "Approval").withArgs(user3.address, testSeller.address, ethers.utils.parseEther("0.000000000005"));
+		
+		await expect(testSeller.connect(user3).receiveTest(ethers.utils.parseEther("0.000000000005")))
 		.to.emit(testSeller, "Receive").withArgs(user3.address, ethers.utils.parseEther("0.000000000005"));
 
 		console.log(await tsCoin.balanceOf(testSeller.address));

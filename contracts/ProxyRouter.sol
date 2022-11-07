@@ -4,17 +4,18 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./ERC20/utils/SafeERC20.sol";
+import "hardhat/console.sol";
 
 library Structs {
     struct Token {
         uint256 price; // price for the token. Used for buy bond, return bond, return bond after bad collecting
-        uint claimTimestamp; // timestamp when the bond will be available for return, is changable if more lastCallTimestamp
-        uint claimTimestampLimit; // timestamp when the bond will be not available for return anymore
+        uint256 claimTimestamp; // timestamp when the bond will be available for return, is changable if more lastCallTimestamp
+        uint256 claimTimestampLimit; // timestamp when the bond will be not available for return anymore
         uint256 available; // shows how much tokens are left for sale
         uint256 sold; // shows how many tokens have been sold
-        uint lastCallTimestamp; // timestamp when project must sell all the tokens
-        uint createdTimestamp; // shows if project is real
-        uint closedTimestamp; // timestamp whe project is closed either by admin or automaticly
+        uint256 lastCallTimestamp; // timestamp when project must sell all the tokens
+        uint256 createdTimestamp; // shows if project is real
+        uint256 closedTimestamp; // timestamp whe project is closed either by admin or automaticly
         bool isActive; // shows if project is active, can be false if project did not collect all the money by set time
         bool isPaused; // shows if token selling is still active
         bool isCollected; // shows if project has collected all money, can be set by admin. Allowed to sell even after true
@@ -23,6 +24,7 @@ library Structs {
 
 library Errors {
     error InvalidTokenData();
+    error UnknownFunctionId();
 }
 
 interface ReferralsContractInterface {
@@ -47,12 +49,15 @@ interface ValidatorContractInterface {
 
 interface TSCoinContract {
     function notPausable() external;
+    function decimals() external view returns(uint8);
 }
 
 contract ProxyRouter is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable token; // usdt token.
+
+    uint public constant MINIMUM_AMOUNT_TO_BUY = 1;
 
     ReferralsContractInterface internal referralsContract;
     ValidatorContractInterface internal validatorContract;
@@ -69,28 +74,65 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
     event TokenClosed(address tokenAddress);
     event UpdateReferralContractAddress(address referralsContractAddress);
 
-    event Buy(address indexed tokenAddress, address indexed user, uint256 amount, uint256 price);
-    event Refund(address indexed tokenAddress, address indexed user, uint256 amount, uint256 price);
-    event Claim(address indexed tokenAddress, address indexed user, uint256 amount, uint256 price);
+    event Buy(
+        address indexed tokenAddress,
+        address indexed user,
+        bool success,
+        uint256 amount,
+        uint256 amountToBuy,
+        uint256 price
+    );
+    event Refund(
+        address indexed tokenAddress,
+        address indexed user,
+        uint256 amount,
+        uint256 price
+    );
+    event Claim(
+        address indexed tokenAddress,
+        address indexed user,
+        uint256 amount,
+        uint256 price
+    );
 
     event Payout(address to, uint256 amount);
+    event PayoutERC20(address tokenAddress, address to, uint256 amount);
     event Credited(address from, uint256 amount);
 
     modifier isTokenPresent(address _tokenAddress, bool _bool) {
         Structs.Token memory _token = tokens[_tokenAddress];
-        require(_token.createdTimestamp != (_bool ? 1 : 0) && _token.isActive);
+        require(
+            (_bool && _token.createdTimestamp != 0) ||
+                (!_bool && _token.createdTimestamp == 0)
+        );
         _;
     }
 
     modifier isTokenActive(address _tokenAddress, bool _bool) {
         Structs.Token memory _token = tokens[_tokenAddress];
-        require(_token.createdTimestamp != 0 && _token.isActive == _bool && !_token.isPaused);
+        require(
+            _token.createdTimestamp != 0 &&
+                _token.isActive == _bool &&
+                !_token.isPaused
+        );
+        _;
+    }
+
+    modifier onlyProxyRouter() {
+        require(
+            _msgSender() == address(this),
+            "Ownable: caller is not the proxyRouter"
+        );
         _;
     }
 
     /** @dev Initializes contract
      */
-    constructor(IERC20 _token, address _referralsContractAddress, address _validatorContractAddress) {
+    constructor(
+        IERC20 _token,
+        address _referralsContractAddress,
+        address _validatorContractAddress
+    ) {
         token = _token;
 
         referralsContract = ReferralsContractInterface(
@@ -114,26 +156,46 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         nonReentrant
     {
         // check for isActive without reverting changed data
-        (bool _success, bytes memory _result) = address(this).call(abi.encodeWithSignature("function checkTokenAreCollected(address)", _tokenAddress));
-        require(_success, "Could not make low level call");
-        (bool _resultAbi) = abi.decode(_result, (bool));
-        require(_resultAbi, "Tokens not collected so project is closed");
+        bool _success;
+        _success = _checkTokensAreCollectedPre(_tokenAddress);
+        if (_success) {
+            (_success, ) = address(this).call(
+                abi.encodeWithSignature(
+                    "_buy(address,address,uint256)",
+                    _tokenAddress,
+                    msg.sender,
+                    _amount
+                )
+            );
+            if (!_success) {
+                emit Buy(_tokenAddress, msg.sender, false, 0, 0, 0);    
+            }
+        }
+    }
 
+    function _buy(
+        address _tokenAddress,
+        address _from,
+        uint256 _amount
+    ) public onlyProxyRouter {
+        TSCoinContract __purchasingToken = TSCoinContract(_tokenAddress);
         Structs.Token memory _token = tokens[_tokenAddress];
 
-        uint256 _amountToBuy = _token.price * _amount;
+        uint256 _amountToBuy = _amount / _token.price;
 
-        token.safeTransferFrom(msg.sender, address(this), _amount);
+        require(_amountToBuy >= MINIMUM_AMOUNT_TO_BUY * 10 ** __purchasingToken.decimals());
+
+        token.safeTransferFrom(_from, address(this), _amount);
 
         IERC20 _purchasingToken = IERC20(_tokenAddress);
         tokens[_tokenAddress].available -= _amountToBuy;
         tokens[_tokenAddress].sold += _amountToBuy;
-        _purchasingToken.safeTransfer(msg.sender, _amountToBuy);
+        _purchasingToken.safeTransfer(_from, _amountToBuy);
 
-        sendReferrals(_amount, msg.sender);
-        checkTokensAreCollected(_tokenAddress);
+        _sendReferrals(_amount, _from);
+        _checkTokensAreCollectedAfter(_tokenAddress);
 
-        emit Buy(_tokenAddress, msg.sender, _amount, _token.price);
+        emit Buy(_tokenAddress, _from, true, _amount, _amountToBuy, _token.price);
 
         // send referrals, check for collected
     }
@@ -147,20 +209,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         isTokenActive(_tokenAddress, false)
         nonReentrant
     {
-        Structs.Token memory _token = tokens[_tokenAddress];
-
-        uint256 _amountToReturn = _amount / _token.price;
-
-        // tokens burn
-        IERC20 _returningToken = IERC20(_tokenAddress);
-        _returningToken.safeBurnFrom(msg.sender, _amount);
-
-        tokens[_tokenAddress].available += _amountToReturn;
-        tokens[_tokenAddress].sold -= _amountToReturn;
-        token.safeTransfer(msg.sender, _amountToReturn);
-
-
-        emit Refund(_tokenAddress, msg.sender, _amount, _token.price);
+        _refund(_tokenAddress, msg.sender, _amount);
     }
 
     /** @dev Claim tokens
@@ -172,21 +221,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         isTokenActive(_tokenAddress, true)
         nonReentrant
     {
-        Structs.Token memory _token = tokens[_tokenAddress];
-        require(_token.claimTimestamp > block.timestamp, "Tokens are not available for claim yet");
-        require(_token.claimTimestampLimit < block.timestamp, "Tokens are not available for claim anymore");
-
-        uint256 _amountToReturn = _amount / _token.price;
-
-        // tokens burn
-        IERC20 _returningToken = IERC20(_tokenAddress);
-        _returningToken.safeBurnFrom(msg.sender, _amount);
-
-        tokens[_tokenAddress].available += _amountToReturn;
-        tokens[_tokenAddress].sold -= _amountToReturn;
-        token.safeTransfer(msg.sender, _amountToReturn);
-
-        emit Claim(_tokenAddress, msg.sender, _amount, _token.price);
+        _claim(_tokenAddress, msg.sender, _amount);
     }
 
     /** @dev Create token
@@ -202,7 +237,8 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _token.price == uint256(0) ||
             _token.claimTimestamp < block.timestamp ||
             _token.available == uint256(0) ||
-            IERC20(_tokenAddress).totalSupply() != _token.available + _token.sold ||
+            IERC20(_tokenAddress).totalSupply() !=
+            _token.available + _token.sold ||
             _token.lastCallTimestamp < block.timestamp ||
             _token.claimTimestamp < _token.lastCallTimestamp ||
             _token.claimTimestampLimit < _token.claimTimestamp
@@ -226,7 +262,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
             _tokenContract.notPausable();
         }
-        validatorContract.createToken(_tokenAddress);
+        // validatorContract.createToken(_tokenAddress);
         tokens[_tokenAddress] = _tokenFinal;
         emit TokenAdded(_tokenFinal);
     }
@@ -241,22 +277,35 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         onlyOwner
     {
         Structs.Token memory _updatingToken = tokens[_tokenAddress];
+        // 13 != 14 && (14 < 174 || 13 < 174) true
+        // 180 != 14 && (14 < 174 || 180 < 174) true
+        // 180 != 182 && (182 < 174 || 180 < 174) false
+
+        // !(!true && true != false) = !(true) = false
+
+        // !(!false && false != false) = !(true) = false
+
+        // !(!true && true != false) = !(true) = false
+
+        // (!false && false == true) = (false) = false
+        // (!true || true == true) = (true) = true
 
         if (
             _token.price == uint256(0) ||
             (_token.claimTimestamp != _updatingToken.claimTimestamp &&
-                _token.claimTimestamp < block.timestamp) ||
+                (_updatingToken.claimTimestamp < block.timestamp ||
+                    _token.claimTimestamp < block.timestamp)) ||
             _token.available == uint256(0) ||
-            IERC20(_tokenAddress).totalSupply() != _token.available + _token.sold ||
+            IERC20(_tokenAddress).totalSupply() !=
+            _token.available + _token.sold ||
             (_token.lastCallTimestamp != _updatingToken.lastCallTimestamp &&
-                _token.lastCallTimestamp < block.timestamp) ||
+                (_updatingToken.lastCallTimestamp < block.timestamp ||
+                    _token.lastCallTimestamp < block.timestamp)) ||
             _token.claimTimestamp < _token.lastCallTimestamp ||
-            !(!_token.isCollected ||
-                _token.isCollected == _updatingToken.isCollected) ||
             (_token.claimTimestampLimit != _updatingToken.claimTimestampLimit &&
-                _token.claimTimestampLimit < block.timestamp) ||
+                (_updatingToken.claimTimestampLimit < block.timestamp ||
+                    _token.claimTimestampLimit < block.timestamp)) ||
             _token.claimTimestampLimit < _token.claimTimestamp
-
         ) {
             revert Errors.InvalidTokenData();
         }
@@ -271,13 +320,13 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _updatingToken.closedTimestamp,
             _updatingToken.isActive,
             _token.isPaused,
-            _token.isCollected
+            (_token.isCollected || _updatingToken.isCollected)
         );
-        if (_token.isCollected) {
+        if (!_updatingToken.isCollected && _token.isCollected) {
             TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
             _tokenContract.notPausable();
         }
-        validatorContract.updateTokenPaused(_tokenAddress, _token.isPaused);
+        // validatorContract.updateTokenPaused(_tokenAddress, _token.isPaused);
         tokens[_tokenAddress] = _tokenFinal;
         emit TokenUpdated(_tokenFinal);
     }
@@ -297,7 +346,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             "Some of tokens are already sold. Cannot be deleted"
         );
 
-        validatorContract.deleteToken(_tokenAddress);
+        // validatorContract.deleteToken(_tokenAddress);
         delete tokens[_tokenAddress];
         emit TokenDeleted(_tokenAddress);
     }
@@ -348,7 +397,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
     /** @dev withdraws value from contract.
      * @param _amount *
      */
-    function withdraw(uint256 _amount) public payable onlyOwner {
+    function withdraw(uint256 _amount) public onlyOwner {
         uint256 balance = address(this).balance;
 
         require(_amount <= balance, "amount should be less than balance");
@@ -359,31 +408,101 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         emit Payout(msg.sender, _amount);
     }
 
-    function sendReferrals(uint256 _usdAmount, address _caller) internal {
+    /** @dev withdraws value from contract.
+     * @param _tokenAddress *
+     * @param _amount *
+     */
+    function withdrawERC20(address _tokenAddress, uint256 _amount)
+        public
+        onlyOwner
+    {
+        IERC20 _token = IERC20(_tokenAddress);
+        _token.safeTransfer(msg.sender, _amount);
+        emit PayoutERC20(_tokenAddress, msg.sender, _amount);
+    }
+
+    function onTokenTransfer(
+        address _from,
+        uint256 _amount,
+        bytes calldata _extraData
+    ) public nonReentrant {
+        require(_extraData.length == 32);
+
+        uint64 _functionId = abi.decode(_extraData, (uint64));
+
+        if (_functionId == 1) {
+            _refund(msg.sender, _from, _amount);
+        } else if (_functionId == 2) {
+            _claim(msg.sender, _from, _amount);
+        } else {
+            revert Errors.UnknownFunctionId();
+        }
+    }
+
+    function _refund(
+        address _tokenAddress,
+        address _from,
+        uint256 _amount
+    ) internal isTokenActive(_tokenAddress, false) {
+        Structs.Token memory _token = tokens[_tokenAddress];
+
+        uint256 _amountToReturn = _amount * _token.price;
+
+        // tokens burn
+        IERC20 _returningToken = IERC20(_tokenAddress);
+        _returningToken.safeBurnFrom(_tokenAddress, _amount);
+
+        tokens[_tokenAddress].available += _amountToReturn;
+        tokens[_tokenAddress].sold -= _amountToReturn;
+        token.safeTransfer(_from, _amountToReturn);
+
+        emit Refund(_tokenAddress, _from, _amount, _token.price);
+    }
+
+    function _claim(
+        address _tokenAddress,
+        address _from,
+        uint256 _amount
+    ) internal isTokenActive(_tokenAddress, true) {
+        Structs.Token memory _token = tokens[_tokenAddress];
+        require(
+            _token.claimTimestamp > block.timestamp,
+            "Tokens are not available for claim yet"
+        );
+        require(
+            _token.claimTimestampLimit < block.timestamp,
+            "Tokens are not available for claim anymore"
+        );
+
+        uint256 _amountToReturn = _amount * _token.price;
+
+        // tokens burn
+        IERC20 _returningToken = IERC20(_tokenAddress);
+        _returningToken.safeBurnFrom(_from, _amount);
+
+        tokens[_tokenAddress].available += _amountToReturn;
+        tokens[_tokenAddress].sold -= _amountToReturn;
+        token.safeTransfer(_from, _amountToReturn);
+
+        emit Claim(_tokenAddress, _from, _amount, _token.price);
+    }
+
+    function _sendReferrals(uint256 _usdAmount, address _caller) internal {
         uint256 _referralFeeAmount = referralsContract
             .calculateReferralFatherFee(_usdAmount, _caller);
         if (_referralFeeAmount != uint256(0)) {
-            referralsContract.addReferralFatherFee(
-                _referralFeeAmount,
-                _caller
-            );
+            referralsContract.addReferralFatherFee(_referralFeeAmount, _caller);
         }
     }
 
-    function checkTokensAreCollected(address _tokenAddress) internal {
-        if (tokens[_tokenAddress].available == uint256(0)) {
-            tokens[_tokenAddress].isCollected = true;
-            TSCoinContract _token = TSCoinContract(_tokenAddress);
-            _token.notPausable();
-        }
-    }
-
-    function checkTokenAreCollected(address _tokenAddress) internal returns(bool) {
+    function _checkTokensAreCollectedPre(address _tokenAddress)
+        internal
+        returns (bool)
+    {
         Structs.Token memory _token = tokens[_tokenAddress];
         // If token either collected, or not collected and lastCallTimestamp not passed
         // Token not collected and lastCallTimestamp passed
         if (!_token.isCollected && _token.lastCallTimestamp < block.timestamp) {
-
             tokens[_tokenAddress].isActive = false;
             tokens[_tokenAddress].closedTimestamp = block.timestamp;
 
@@ -395,6 +514,14 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             return false;
         }
         return true;
+    }
+
+    function _checkTokensAreCollectedAfter(address _tokenAddress) internal {
+        if (tokens[_tokenAddress].available == uint256(0)) {
+            tokens[_tokenAddress].isCollected = true;
+            TSCoinContract _token = TSCoinContract(_tokenAddress);
+            _token.notPausable();
+        }
     }
 
     receive() external payable {
