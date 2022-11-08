@@ -9,39 +9,27 @@ const hre = require("hardhat");
 async function main() {
     const [owner] = await ethers.getSigners();
 
-    const ProxyRouter = await hre.ethers.getContractFactory("ProxyRouterUpgradable");
-    const proxyRouter = ProxyRouter.attach("0x1F6AF640aa8E4fD1f35Dd973C6A51A11048c993e");
-    let referralAddress = "0xBeAdde56C07a2c9707AeF1a78bE707a4EC46DC21";
-    let gamesPoolAddress = "0x2B6afaE55024320ee772DBa1cE80FA0Ca2E857ed";
-    let megaDiceAddress = "0xb15d2FE6C9320F4BAb4C5D2B8cF7962176D91E87";
+    const ProxyRouter = await hre.ethers.getContractFactory("ProxyRouterUpgradeable");
+    const proxyRouter = ProxyRouter.attach("0x97eb8b6aB86AbE13347de0EaFFcBd62fD8b87D25");
+    const ReferralToken = await hre.ethers.getContractFactory("ReferralToken");
+    const referralToken = ReferralToken.attach("0x0A3b2Bef13fEb27b0DD62A83BC07C28395609a58");
+    let referralAddress = "0x0cAfC31298748dAE2ae6A794bc6d34f3b07e42Cc";
+    let tsCoinAddress = "0x7b70F0bDDDc069d2aaac8c20490752d6AdbdEFaf";
+ 
+    let tx = await referralToken.transfer(referralAddress, await referralToken.balanceOf(owner.address));
+    await tx.wait();
 
-    const Referrals = await hre.ethers.getContractFactory("ReferralsUpgradable");
-    let referrals = Referrals.attach(referralAddress);
+    DECIMAL = ethers.BigNumber.from(10).pow(18)
 
-    const updateGamesPoolContractAddressTx = await proxyRouter.updateGamesPoolContractAddress(gamesPoolAddress);
-    await updateGamesPoolContractAddressTx.wait();
-    const updateReferralContractAddressTx = await proxyRouter.updateReferralContractAddress(referralAddress);
-    await updateReferralContractAddressTx.wait();
+    let tx1 = await proxyRouter.createToken(tsCoinAddress, [
+        100, 1767801720, 1777801720, ethers.BigNumber.from(480000).mul(DECIMAL), 0,
+        1757801720, 0, 0, true, false, false
+    ]);
+    await tx1.wait();
 
-    const setNewHelperAccountTx = await referrals.setNewHelperAccount("0xf8E461447a3F70D368d5Eb980331C178015769a7");
-    await setNewHelperAccountTx.wait();
+    await expect(proxyRouter.updateReferralContractAddress(referralAddress))
+        .to.emit(proxyRouter, "UpdateReferralContractAddress").withArgs(referralAddress);
 
-    let game = {
-        name: "megadice",
-        gameAddress: megaDiceAddress,
-        transactionFee: {
-            currentFee: 300,
-            nextFee: 0,
-            startTime: 0
-        }
-    };
-    await owner.sendTransaction({
-        to: gamesPoolAddress,
-        value: ethers.utils.parseEther("0.2"),
-    });
-
-    const updateGameTx = await proxyRouter.updateGame(game);
-    await updateGameTx.wait();
     console.log("Init Done!");
 }
 

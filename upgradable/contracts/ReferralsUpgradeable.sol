@@ -39,7 +39,7 @@ library Structs {
     }
 }
 
-contract ReferralsUpgradable is Initializable,
+contract ReferralsUpgradeable is Initializable,
     UUPSUpgradeable,
     OwnableUpgradeable,
     ReentrancyGuardUpgradeable {
@@ -105,6 +105,8 @@ contract ReferralsUpgradable is Initializable,
         prepareAndUpdateReferralLevelsAndPercents(_referralLevelsAndPercents);
         rootCaller = _rootCaller;
         helperAccount = _helperAccount;
+        __Ownable_init();
+        __ReentrancyGuard_init();
     }
 
     

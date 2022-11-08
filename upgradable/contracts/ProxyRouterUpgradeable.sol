@@ -12,7 +12,7 @@ library Structs {
     struct Token {
         uint256 price; // price for the token. Used for buy bond, return bond, return bond after bad collecting
         uint256 claimTimestamp; // timestamp when the bond will be available for return, is changable if more lastCallTimestamp
-        uint256 claimTimestampLimit; // timestamp when the bond will be not available for return anymore
+        uint256 limitTimestamp; // timestamp when the bond will be not available for return anymore
         uint256 available; // shows how much tokens are left for sale
         uint256 sold; // shows how many tokens have been sold
         uint256 lastCallTimestamp; // timestamp when project must sell all the tokens
@@ -42,6 +42,8 @@ interface ReferralsContractInterface {
 }
 
 interface ValidatorContractInterface {
+    function proxyRouterContractAddress() external view returns (address);
+
     function createToken(address _tokenAddress) external;
 
     function updateTokenPaused(address _tokenAddress, bool _isPaused) external;
@@ -54,7 +56,7 @@ interface TSCoinContract {
     function decimals() external view returns(uint8);
 }
 
-contract ProxyRouterUpgradable is Initializable,
+contract ProxyRouterUpgradeable is Initializable,
     UUPSUpgradeable,
     OwnableUpgradeable,
     ReentrancyGuardUpgradeable {
@@ -78,6 +80,9 @@ contract ProxyRouterUpgradable is Initializable,
     event TokenDeleted(address tokenAddress);
     event TokenClosed(address tokenAddress);
     event UpdateReferralContractAddress(address referralsContractAddress);
+    event UpdateValidatorContractAddress(address validatorContractAddress);
+    event MainTokenChanged(address tokenAddress);
+
 
     event Buy(
         address indexed tokenAddress,
@@ -91,12 +96,14 @@ contract ProxyRouterUpgradable is Initializable,
         address indexed tokenAddress,
         address indexed user,
         uint256 amount,
+        uint256 amountReturned,
         uint256 price
     );
     event Claim(
         address indexed tokenAddress,
         address indexed user,
         uint256 amount,
+        uint256 amountReturned,
         uint256 price
     );
 
@@ -149,6 +156,8 @@ contract ProxyRouterUpgradable is Initializable,
             _validatorContractAddress
         );
         validatorContractAddress = _validatorContractAddress;
+        __Ownable_init();
+        __ReentrancyGuard_init();
     }
   
     ///@dev required by the OZ UUPS module
@@ -178,6 +187,8 @@ contract ProxyRouterUpgradable is Initializable,
             if (!_success) {
                 emit Buy(_tokenAddress, msg.sender, false, 0, 0, 0);    
             }
+        } else {
+            emit Buy(_tokenAddress, msg.sender, false, 0, 0, 0);    
         }
     }
 
@@ -210,7 +221,7 @@ contract ProxyRouterUpgradable is Initializable,
 
     /** @dev Refund tokens if amount not collected
      * @param _tokenAddress address of the buying token.
-     * @param _amount amount of usdt.
+     * @param _amount amount of ts.
      */
     function refund(address _tokenAddress, uint256 _amount)
         public
@@ -222,7 +233,7 @@ contract ProxyRouterUpgradable is Initializable,
 
     /** @dev Claim tokens
      * @param _tokenAddress address of the buying token.
-     * @param _amount amount of usdt.
+     * @param _amount amount of ts.
      */
     function claim(address _tokenAddress, uint256 _amount)
         public
@@ -249,14 +260,14 @@ contract ProxyRouterUpgradable is Initializable,
             _token.available + _token.sold ||
             _token.lastCallTimestamp < block.timestamp ||
             _token.claimTimestamp < _token.lastCallTimestamp ||
-            _token.claimTimestampLimit < _token.claimTimestamp
+            _token.limitTimestamp < _token.claimTimestamp
         ) {
             revert Errors.InvalidTokenData();
         }
         Structs.Token memory _tokenFinal = Structs.Token(
             _token.price,
             _token.claimTimestamp,
-            _token.claimTimestampLimit,
+            _token.limitTimestamp,
             _token.available,
             _token.sold,
             _token.lastCallTimestamp,
@@ -285,21 +296,8 @@ contract ProxyRouterUpgradable is Initializable,
         onlyOwner
     {
         Structs.Token memory _updatingToken = tokens[_tokenAddress];
-        // 13 != 14 && (14 < 174 || 13 < 174) true
-        // 180 != 14 && (14 < 174 || 180 < 174) true
-        // 180 != 182 && (182 < 174 || 180 < 174) false
-
-        // !(!true && true != false) = !(true) = false
-
-        // !(!false && false != false) = !(true) = false
-
-        // !(!true && true != false) = !(true) = false
-
-        // (!false && false == true) = (false) = false
-        // (!true || true == true) = (true) = true
 
         if (
-            _token.price == uint256(0) ||
             (_token.claimTimestamp != _updatingToken.claimTimestamp &&
                 (_updatingToken.claimTimestamp < block.timestamp ||
                     _token.claimTimestamp < block.timestamp)) ||
@@ -310,17 +308,18 @@ contract ProxyRouterUpgradable is Initializable,
                 (_updatingToken.lastCallTimestamp < block.timestamp ||
                     _token.lastCallTimestamp < block.timestamp)) ||
             _token.claimTimestamp < _token.lastCallTimestamp ||
-            (_token.claimTimestampLimit != _updatingToken.claimTimestampLimit &&
-                (_updatingToken.claimTimestampLimit < block.timestamp ||
-                    _token.claimTimestampLimit < block.timestamp)) ||
-            _token.claimTimestampLimit < _token.claimTimestamp
+            (_token.limitTimestamp != _updatingToken.limitTimestamp &&
+                (_updatingToken.limitTimestamp < block.timestamp ||
+                    _token.limitTimestamp < block.timestamp)) ||
+            (_updatingToken.isActive && _token.limitTimestamp < _token.claimTimestamp) ||
+            (!_updatingToken.isActive && _token.limitTimestamp > _token.lastCallTimestamp)
         ) {
             revert Errors.InvalidTokenData();
         }
         Structs.Token memory _tokenFinal = Structs.Token(
-            _token.price,
+            _updatingToken.price,
             _token.claimTimestamp,
-            _token.claimTimestampLimit,
+            _token.limitTimestamp,
             _token.available,
             _token.sold,
             _token.lastCallTimestamp,
@@ -374,8 +373,15 @@ contract ProxyRouterUpgradable is Initializable,
             "Tokens are not sold. Should be deleted"
         );
 
+        require(
+            _token.claimTimestamp > block.timestamp,
+            "Claim period has started"
+        );
+
         tokens[_tokenAddress].isActive = false;
         tokens[_tokenAddress].closedTimestamp = block.timestamp;
+        tokens[_tokenAddress].limitTimestamp = block.timestamp + 2_592_000;
+        
 
         TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
         _tokenContract.notPausable();
@@ -400,6 +406,25 @@ contract ProxyRouterUpgradable is Initializable,
         );
         referralsContractAddress = _referralsContractAddress;
         emit UpdateReferralContractAddress(_referralsContractAddress);
+    }
+
+    /** @dev Updates referrals contractAddress
+     * @param _validatorContractAddress address of new contract.
+     */
+    function updateValidatorContractAddress(address _validatorContractAddress)
+        public
+        onlyOwner
+    {
+        require(
+            ValidatorContractInterface(_validatorContractAddress)
+                .proxyRouterContractAddress() == address(this),
+            "Root caller of that contract is different"
+        );
+        validatorContract = ValidatorContractInterface(
+            _validatorContractAddress
+        );
+        validatorContractAddress = _validatorContractAddress;
+        emit UpdateValidatorContractAddress(_validatorContractAddress);
     }
 
     /** @dev withdraws value from contract.
@@ -429,7 +454,18 @@ contract ProxyRouterUpgradable is Initializable,
         emit PayoutERC20(_tokenAddress, msg.sender, _amount);
     }
 
-    function onTokenTransfer(
+    /** @dev changes main contract token.
+     * @param _tokenAddress *
+     */
+    function changeToken(address _tokenAddress)
+        public
+        onlyOwner
+    {
+        token = IERC20(_tokenAddress);
+        emit MainTokenChanged(_tokenAddress);
+    }
+
+    function onTokenApproval(
         address _from,
         uint256 _amount,
         bytes calldata _extraData
@@ -454,17 +490,22 @@ contract ProxyRouterUpgradable is Initializable,
     ) internal isTokenActive(_tokenAddress, false) {
         Structs.Token memory _token = tokens[_tokenAddress];
 
+        require(
+            block.timestamp < _token.limitTimestamp,
+            "Tokens are not available"
+        );
+
         uint256 _amountToReturn = _amount * _token.price;
 
         // tokens burn
         IERC20 _returningToken = IERC20(_tokenAddress);
-        _returningToken.safeBurnFrom(_tokenAddress, _amount);
+        _returningToken.safeBurnFrom(_from, _amount);
 
-        tokens[_tokenAddress].available += _amountToReturn;
-        tokens[_tokenAddress].sold -= _amountToReturn;
+        tokens[_tokenAddress].available += _amount;
+        tokens[_tokenAddress].sold -= _amount;
         token.safeTransfer(_from, _amountToReturn);
 
-        emit Refund(_tokenAddress, _from, _amount, _token.price);
+        emit Refund(_tokenAddress, _from, _amount, _amountToReturn, _token.price);
     }
 
     function _claim(
@@ -474,12 +515,9 @@ contract ProxyRouterUpgradable is Initializable,
     ) internal isTokenActive(_tokenAddress, true) {
         Structs.Token memory _token = tokens[_tokenAddress];
         require(
-            _token.claimTimestamp > block.timestamp,
-            "Tokens are not available for claim yet"
-        );
-        require(
-            _token.claimTimestampLimit < block.timestamp,
-            "Tokens are not available for claim anymore"
+            _token.claimTimestamp < block.timestamp 
+            && block.timestamp < _token.limitTimestamp,
+            "Tokens are not available"
         );
 
         uint256 _amountToReturn = _amount * _token.price;
@@ -488,11 +526,11 @@ contract ProxyRouterUpgradable is Initializable,
         IERC20 _returningToken = IERC20(_tokenAddress);
         _returningToken.safeBurnFrom(_from, _amount);
 
-        tokens[_tokenAddress].available += _amountToReturn;
-        tokens[_tokenAddress].sold -= _amountToReturn;
+        tokens[_tokenAddress].available += _amount;
+        tokens[_tokenAddress].sold -= _amount;
         token.safeTransfer(_from, _amountToReturn);
 
-        emit Claim(_tokenAddress, _from, _amount, _token.price);
+        emit Claim(_tokenAddress, _from, _amount, _amountToReturn, _token.price);
     }
 
     function _sendReferrals(uint256 _usdAmount, address _caller) internal {
@@ -513,6 +551,7 @@ contract ProxyRouterUpgradable is Initializable,
         if (!_token.isCollected && _token.lastCallTimestamp < block.timestamp) {
             tokens[_tokenAddress].isActive = false;
             tokens[_tokenAddress].closedTimestamp = block.timestamp;
+            tokens[_tokenAddress].limitTimestamp = block.timestamp + 2_592_000;
 
             TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
             _tokenContract.notPausable();

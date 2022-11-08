@@ -35,12 +35,12 @@ async function main() {
     // const proxyRouter = await ProxyRouter.deploy(...args);
 
     // Deploying mutable
-    const ProxyRouter = await hre.ethers.getContractFactory("ProxyRouterUpgradable");
-    const proxyRouter = await upgrades.deployProxy(ProxyRouter, args, {kind: "uups"});
+    // const ProxyRouter = await hre.ethers.getContractFactory("ProxyRouterUpgradeable");
+    // const proxyRouter = await upgrades.deployProxy(ProxyRouter, args, {kind: "uups"});
 
     // Upgrading
-    // const ProxyRouter = await ethers.getContractFactory("ProxyRouterUpgradable");
-    // const proxyRouter = await upgrades.upgradeProxy("0x1F6AF640aa8E4fD1f35Dd973C6A51A11048c993e", ProxyRouter);
+    const ProxyRouter = await ethers.getContractFactory("ProxyRouterUpgradeable");
+    const proxyRouter = await upgrades.upgradeProxy("0x97eb8b6aB86AbE13347de0EaFFcBd62fD8b87D25", ProxyRouter);
 
     await proxyRouter.deployed();
 

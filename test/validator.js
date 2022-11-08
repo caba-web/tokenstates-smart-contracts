@@ -162,8 +162,12 @@ describe("Validator", function () {
 		await ethers.provider.send("evm_setNextBlockTimestamp", [1669852801])
 		await ethers.provider.send("evm_mine")
 
+		const blockNumAfter = await ethers.provider.getBlockNumber();
+        const blockAfter = await ethers.provider.getBlock(blockNumAfter);
+        const timestampAfter = blockAfter.timestamp;
+
 		await expect(validator.connect(user1).lock(tsCoin.address, ethers.utils.parseEther("10")))
-            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"), timestampBefore + 3 )
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"), timestampAfter + 1 )
             .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));	
 
 		console.log(await validator.userTokens(tsCoin.address, user1.address))

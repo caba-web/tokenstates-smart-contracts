@@ -33,10 +33,12 @@ library Structs {
     struct LockedTokens {
         uint256 initLocked;
         uint256 initTimeCreate;
-        uint256 toClaim;
-        uint256 earned;
         uint256 lastCalculationTimestamp;
         LockedTokensSecondary[] otherTokens;
+    }
+    struct EarnedAndToClaim {
+        uint256 earned;
+        uint256 toClaim;
     }
 }
 
@@ -64,6 +66,7 @@ contract Validator is Ownable, ReentrancyGuard {
     mapping(address => Structs.Token) public tokens;
     mapping(address => mapping(address => Structs.LockedTokens))
         public userTokens;
+    mapping(address => Structs.EarnedAndToClaim) public userEarned;
 
     // Events
     event TokensLocked(
@@ -178,7 +181,7 @@ contract Validator is Ownable, ReentrancyGuard {
     {
         calculateEarnings(_tokenAddress, msg.sender);
         recalculateMonths(_tokenAddress, msg.sender);
-        userTokens[_tokenAddress][msg.sender].toClaim -= _amount;
+        userEarned[msg.sender].toClaim -= _amount;
         token.transfer(msg.sender, _amount);
         emit Claimed(_tokenAddress, msg.sender, _amount, block.timestamp);
     }
@@ -499,8 +502,8 @@ contract Validator is Ownable, ReentrancyGuard {
 
             userTokens[_tokenAddress][_user]
                 .lastCalculationTimestamp = _newTimestamp;
-            userTokens[_tokenAddress][_user].earned += _earnings;
-            userTokens[_tokenAddress][_user].toClaim += _earnings;
+            userEarned[_user].earned += _earnings;
+            userEarned[_user].toClaim += _earnings;
         }
     }
 

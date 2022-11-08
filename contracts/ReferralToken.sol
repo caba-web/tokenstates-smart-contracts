@@ -14,7 +14,7 @@ abstract contract ApproveAndCallFallBack {
     ) external virtual;
 }
 
-contract ReferralToken is ERC20Burnable {
+contract ReferralToken is ERC20Burnable, Ownable {
 
     /**
      * @dev Initialize contract
@@ -47,5 +47,9 @@ contract ReferralToken is ERC20Burnable {
         );
 
         return true;
+    }
+
+    function mint(address to, uint amount) public onlyOwner {
+        _mint(to, amount);
     }
 }

@@ -125,6 +125,8 @@ contract ValidatorUpgradeable is Initializable,
             _proxyRouterContractAddress
         );
         proxyRouterContractAddress = _proxyRouterContractAddress;
+        __Ownable_init();
+        __ReentrancyGuard_init();
     }
 
     ///@dev required by the OZ UUPS module

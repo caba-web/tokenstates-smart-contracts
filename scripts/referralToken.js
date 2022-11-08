@@ -7,17 +7,18 @@ const { ethers, upgrades } = require("hardhat");
 const hre = require("hardhat");
 
 
-async function main(proxyRouterAddress = "0x0000000000000000000000000000000000000000") {
+async function main() {
 	const networkName = hre.network.name;
 
+    [owner] = await hre.ethers.getSigners();
+
 	let args = [
-		proxyRouterAddress,
-		"TS Hotel",
-		"tsHT",
-		18,
-		480000,
-		proxyRouterAddress
-	];
+        owner.address,
+        "TS Referral",
+        "tsREF",
+        18,
+        2000000000000000
+    ];
 
 	if (networkName === "bscTestnet") {
 		
@@ -31,18 +32,18 @@ async function main(proxyRouterAddress = "0x000000000000000000000000000000000000
 	console.log(await (await hre.ethers.getSigner()).getBalance())
 
 	// Base deploy immutable
-	const TSCoin = await hre.ethers.getContractFactory("TSCoin");
-	const tsCoin = await TSCoin.deploy(...args);
+	const ReferralToken = await hre.ethers.getContractFactory("ReferralToken");
+	const referralToken = await ReferralToken.deploy(...args);
 
-	await tsCoin.deployed();
+	await referralToken.deployed();
 
-	console.log("TSCoin deployed to:", tsCoin.address);
-	return tsCoin.address;
+	console.log("ReferralToken deployed to:", referralToken.address);
+	return referralToken.address;
 }
 
 // We recommend this pattern to be able to use async/await everywhere
 // and properly handle errors.
-main("0x97eb8b6aB86AbE13347de0EaFFcBd62fD8b87D25")
+main()
 	.then(() => process.exit(0))
 	.catch((error) => {
 		console.error(error);
