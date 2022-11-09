@@ -3,6 +3,7 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
 import "./ERC20/utils/SafeERC20.sol";
 import "hardhat/console.sol";
 
@@ -28,8 +29,6 @@ library Errors {
 }
 
 interface ReferralsContractInterface {
-    function rootCaller() external view returns (address);
-
     function calculateReferralFatherFee(uint256 _amount, address _childReferral)
         external
         view
@@ -39,19 +38,8 @@ interface ReferralsContractInterface {
         external;
 }
 
-interface ValidatorContractInterface {
-    function proxyRouterContractAddress() external view returns (address);
-
-    function createToken(address _tokenAddress) external;
-
-    function updateTokenPaused(address _tokenAddress, bool _isPaused) external;
-
-    function deleteToken(address _tokenAddress) external;
-}
-
 interface TSCoinContract {
     function notPausable() external;
-    function decimals() external view returns(uint8);
 }
 
 contract ProxyRouter is Ownable, ReentrancyGuard {
@@ -59,13 +47,12 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
 
     IERC20 public immutable token; // usdt token.
 
-    uint public constant MINIMUM_AMOUNT_TO_BUY = 1;
+    uint256 public constant MINIMUM_AMOUNT_TO_BUY = 1 * 10 ** 18;
 
     ReferralsContractInterface internal referralsContract;
-    ValidatorContractInterface internal validatorContract;
-
     address public referralsContractAddress;
-    address public validatorContractAddress;
+    bool private isReferralActive;
+
 
     mapping(address => Structs.Token) public tokens;
 
@@ -73,9 +60,9 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
     event TokenAdded(Structs.Token tokenObj);
     event TokenUpdated(Structs.Token tokenObj);
     event TokenDeleted(address tokenAddress);
+    event TokenCollected(address tokenAddress);
     event TokenClosed(address tokenAddress);
     event UpdateReferralContractAddress(address referralsContractAddress);
-    event UpdateValidatorContractAddress(address validatorContractAddress);
 
     event Buy(
         address indexed tokenAddress,
@@ -135,20 +122,16 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
      */
     constructor(
         IERC20 _token,
-        address _referralsContractAddress,
-        address _validatorContractAddress
+        address _referralsContractAddress
     ) {
         token = _token;
-
-        referralsContract = ReferralsContractInterface(
-            _referralsContractAddress
-        );
-        referralsContractAddress = _referralsContractAddress;
-
-        validatorContract = ValidatorContractInterface(
-            _validatorContractAddress
-        );
-        validatorContractAddress = _validatorContractAddress;
+        if (Address.isContract(_referralsContractAddress)) {
+            isReferralActive = true;
+            referralsContract = ReferralsContractInterface(
+                _referralsContractAddress
+            );
+            referralsContractAddress = _referralsContractAddress;
+        }
     }
 
     /** @dev Buy tokens
@@ -173,10 +156,10 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
                 )
             );
             if (!_success) {
-                emit Buy(_tokenAddress, msg.sender, false, 0, 0, 0);    
+                emit Buy(_tokenAddress, msg.sender, false, 0, 0, 0);
             }
         } else {
-            emit Buy(_tokenAddress, msg.sender, false, 0, 0, 0);    
+            emit Buy(_tokenAddress, msg.sender, false, 0, 0, 0);
         }
     }
 
@@ -185,12 +168,14 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         address _from,
         uint256 _amount
     ) public onlyProxyRouter {
-        TSCoinContract __purchasingToken = TSCoinContract(_tokenAddress);
         Structs.Token memory _token = tokens[_tokenAddress];
 
         uint256 _amountToBuy = _amount / _token.price;
 
-        require(_amountToBuy >= MINIMUM_AMOUNT_TO_BUY * 10 ** __purchasingToken.decimals());
+        require(
+            _amountToBuy >=
+                MINIMUM_AMOUNT_TO_BUY
+        );
 
         token.safeTransferFrom(_from, address(this), _amount);
 
@@ -202,7 +187,14 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         _sendReferrals(_amount, _from);
         _checkTokensAreCollectedAfter(_tokenAddress);
 
-        emit Buy(_tokenAddress, _from, true, _amount, _amountToBuy, _token.price);
+        emit Buy(
+            _tokenAddress,
+            _from,
+            true,
+            _amount,
+            _amountToBuy,
+            _token.price
+        );
 
         // send referrals, check for collected
     }
@@ -269,7 +261,6 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
             _tokenContract.notPausable();
         }
-        validatorContract.createToken(_tokenAddress);
         tokens[_tokenAddress] = _tokenFinal;
         emit TokenAdded(_tokenFinal);
     }
@@ -299,8 +290,10 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             (_token.limitTimestamp != _updatingToken.limitTimestamp &&
                 (_updatingToken.limitTimestamp < block.timestamp ||
                     _token.limitTimestamp < block.timestamp)) ||
-            (_updatingToken.isActive && _token.limitTimestamp < _token.claimTimestamp) ||
-            (!_updatingToken.isActive && _token.limitTimestamp > _token.lastCallTimestamp)
+            (_updatingToken.isActive &&
+                _token.limitTimestamp < _token.claimTimestamp) ||
+            (!_updatingToken.isActive &&
+                _token.limitTimestamp < _token.lastCallTimestamp)
         ) {
             revert Errors.InvalidTokenData();
         }
@@ -317,12 +310,12 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _token.isPaused,
             (_token.isCollected || _updatingToken.isCollected)
         );
+        tokens[_tokenAddress] = _tokenFinal;
         if (!_updatingToken.isCollected && _token.isCollected) {
             TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
             _tokenContract.notPausable();
+            emit TokenCollected(_tokenAddress);
         }
-        validatorContract.updateTokenPaused(_tokenAddress, _token.isPaused);
-        tokens[_tokenAddress] = _tokenFinal;
         emit TokenUpdated(_tokenFinal);
     }
 
@@ -340,8 +333,6 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _token.sold == uint256(0),
             "Some of tokens are already sold. Cannot be deleted"
         );
-
-        validatorContract.deleteToken(_tokenAddress);
         delete tokens[_tokenAddress];
         emit TokenDeleted(_tokenAddress);
     }
@@ -369,7 +360,6 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         tokens[_tokenAddress].isActive = false;
         tokens[_tokenAddress].closedTimestamp = block.timestamp;
         tokens[_tokenAddress].limitTimestamp = block.timestamp + 2_592_000;
-        
 
         TSCoinContract _tokenContract = TSCoinContract(_tokenAddress);
         _tokenContract.notPausable();
@@ -380,39 +370,22 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
     /** @dev Updates referrals contractAddress
      * @param _referralsContractAddress address of new contract.
      */
-    function updateReferralContractAddress(address _referralsContractAddress)
+    function updateReferralContractAddress(address _referralsContractAddress, bool _isActive)
         public
         onlyOwner
     {
-        require(
-            ReferralsContractInterface(_referralsContractAddress)
-                .rootCaller() == address(this),
-            "Root caller of that contract is different"
-        );
-        referralsContract = ReferralsContractInterface(
-            _referralsContractAddress
-        );
-        referralsContractAddress = _referralsContractAddress;
-        emit UpdateReferralContractAddress(_referralsContractAddress);
-    }
+        if (Address.isContract(_referralsContractAddress)) {
+            isReferralActive = _isActive;
+            referralsContract = ReferralsContractInterface(
+                _referralsContractAddress
+            );
+            referralsContractAddress = _referralsContractAddress;
+        } else {
+            isReferralActive = false;
+            referralsContractAddress = address(0);
+        }
 
-    /** @dev Updates referrals contractAddress
-     * @param _validatorContractAddress address of new contract.
-     */
-    function updateValidatorContractAddress(address _validatorContractAddress)
-        public
-        onlyOwner
-    {
-        require(
-            ValidatorContractInterface(_validatorContractAddress)
-                .proxyRouterContractAddress() == address(this),
-            "Root caller of that contract is different"
-        );
-        validatorContract = ValidatorContractInterface(
-            _validatorContractAddress
-        );
-        validatorContractAddress = _validatorContractAddress;
-        emit UpdateValidatorContractAddress(_validatorContractAddress);
+        emit UpdateReferralContractAddress(referralsContractAddress);
     }
 
     /** @dev withdraws value from contract.
@@ -482,7 +455,13 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         tokens[_tokenAddress].sold -= _amount;
         token.safeTransfer(_from, _amountToReturn);
 
-        emit Refund(_tokenAddress, _from, _amount, _amountToReturn, _token.price);
+        emit Refund(
+            _tokenAddress,
+            _from,
+            _amount,
+            _amountToReturn,
+            _token.price
+        );
     }
 
     function _claim(
@@ -492,8 +471,8 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
     ) internal isTokenActive(_tokenAddress, true) {
         Structs.Token memory _token = tokens[_tokenAddress];
         require(
-            _token.claimTimestamp < block.timestamp 
-            && block.timestamp < _token.limitTimestamp,
+            _token.isCollected && _token.claimTimestamp < block.timestamp &&
+                block.timestamp < _token.limitTimestamp,
             "Tokens are not available"
         );
 
@@ -507,10 +486,17 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         tokens[_tokenAddress].sold -= _amount;
         token.safeTransfer(_from, _amountToReturn);
 
-        emit Claim(_tokenAddress, _from, _amount, _amountToReturn, _token.price);
+        emit Claim(
+            _tokenAddress,
+            _from,
+            _amount,
+            _amountToReturn,
+            _token.price
+        );
     }
 
     function _sendReferrals(uint256 _usdAmount, address _caller) internal {
+        if (!isReferralActive) {return;}
         uint256 _referralFeeAmount = referralsContract
             .calculateReferralFatherFee(_usdAmount, _caller);
         if (_referralFeeAmount != uint256(0)) {
@@ -545,6 +531,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             tokens[_tokenAddress].isCollected = true;
             TSCoinContract _token = TSCoinContract(_tokenAddress);
             _token.notPausable();
+            emit TokenCollected(_tokenAddress);
         }
     }
 

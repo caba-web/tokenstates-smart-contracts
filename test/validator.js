@@ -30,7 +30,6 @@ describe("Validator", function () {
 			...[
 				testUsdt.address,
 				"0x0000000000000000000000000000000000000001",
-				"0x0000000000000000000000000000000000000001"
 			]
 		);
 		await proxyRouter.deployed();
@@ -57,13 +56,8 @@ describe("Validator", function () {
 		);
 		await validator.deployed();
 
-		await expect(proxyRouter.updateValidatorContractAddress(validator.address))
-			.to.emit(proxyRouter, "UpdateValidatorContractAddress").withArgs(validator.address);
-
 		await expect(tsCoin.addInitApproval(validator.address,  false))
 			.to.emit(tsCoin, "AddInitApproval").withArgs(validator.address, false);
-
-		expect((await proxyRouter.validatorContractAddress())).to.equal(validator.address);
 
 		ReferralToken = await ethers.getContractFactory("ReferralToken");
         referralToken = await ReferralToken.deploy(
@@ -97,7 +91,7 @@ describe("Validator", function () {
         );
         await referrals.deployed();
 
-        await expect(proxyRouter.updateReferralContractAddress(referrals.address))
+        await expect(proxyRouter.updateReferralContractAddress(referrals.address, true))
             .to.emit(proxyRouter, "UpdateReferralContractAddress").withArgs(referrals.address);
 
 		const blockNumBefore = await ethers.provider.getBlockNumber();
@@ -112,6 +106,9 @@ describe("Validator", function () {
                 50, 1767801720, 1777801720, ethers.BigNumber.from(1000000).mul(DECIMAL), 0,
                 1757801720, timestampBefore + 1, 0, true, false, false
             ]);
+
+        await expect(validator.createToken(tsCoin.address))
+            .to.emit(validator, "TokenAdded").withArgs(tsCoin.address);
 
         await expect(testUsdt.connect(user1).approve(proxyRouter.address, ethers.utils.parseEther("3000")))
             .to.emit(testUsdt, "Approval").withArgs(user1.address, proxyRouter.address, ethers.utils.parseEther("3000"));

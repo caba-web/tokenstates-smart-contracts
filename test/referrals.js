@@ -25,12 +25,11 @@ describe("Referrals", function () {
         );
         await testUsdt.deployed();
 
-        ProxyRouter = await ethers.getContractFactory("ProxyRouterWithoutValidator");
+        ProxyRouter = await ethers.getContractFactory("ProxyRouter");
         proxyRouter = await ProxyRouter.deploy(
             ...[
                 testUsdt.address,
                 "0x0000000000000000000000000000000000000001",
-                "0x0000000000000000000000000000000000000001"
             ]
         );
         await proxyRouter.deployed();
@@ -70,7 +69,7 @@ describe("Referrals", function () {
         let tx = await referralToken.transfer(referrals.address, await referralToken.balanceOf(owner.address));
         await tx.wait();
 
-        await expect(proxyRouter.updateReferralContractAddress(referrals.address))
+        await expect(proxyRouter.updateReferralContractAddress(referrals.address, true))
             .to.emit(proxyRouter, "UpdateReferralContractAddress").withArgs(referrals.address);
 
     })

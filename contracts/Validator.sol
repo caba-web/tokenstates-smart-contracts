@@ -114,23 +114,6 @@ contract Validator is Ownable, ReentrancyGuard {
         _;
     }
 
-    modifier onlyProxyRouterAccount() {
-        require(
-            _msgSender() == proxyRouterContractAddress,
-            "Ownable: caller is not the proxyRouter"
-        );
-        _;
-    }
-
-    modifier onlyOwnerOrProxyRouterAccount() {
-        require(
-            _msgSender() == owner() ||
-                _msgSender() == proxyRouterContractAddress,
-            "Ownable: caller is not the proxyRouter"
-        );
-        _;
-    }
-
     /** @dev Initializes contract
      */
     constructor(IERC20 _token, address _proxyRouterContractAddress) {
@@ -192,7 +175,7 @@ contract Validator is Ownable, ReentrancyGuard {
     function createToken(address _tokenAddress)
         public
         isTokenPresent(_tokenAddress, false)
-        onlyProxyRouterAccount
+        onlyOwner
     {
         tokens[_tokenAddress].isPresent = true;
         tokens[_tokenAddress].isPaused = false;
@@ -208,7 +191,7 @@ contract Validator is Ownable, ReentrancyGuard {
     function updateTokenPaused(address _tokenAddress, bool _isPaused)
         public
         isTokenPresent(_tokenAddress, true)
-        onlyOwnerOrProxyRouterAccount
+        onlyOwner
     {
         tokens[_tokenAddress].isPaused = _isPaused;
         emit TokenUpdated(_tokenAddress, _isPaused);
@@ -220,7 +203,7 @@ contract Validator is Ownable, ReentrancyGuard {
     function deleteToken(address _tokenAddress)
         public
         isTokenPresent(_tokenAddress, true)
-        onlyProxyRouterAccount
+        onlyOwner
     {
         Structs.Token storage _token = tokens[_tokenAddress];
         require(

@@ -10,12 +10,11 @@ describe("ProxyRouter", function () {
 	beforeEach(async () => {
 		await network.provider.send("hardhat_reset");
 		[owner, user1, user2, user3] = await ethers.getSigners();
-		ProxyRouter = await ethers.getContractFactory("ProxyRouterWithoutValidator");
+		ProxyRouter = await ethers.getContractFactory("ProxyRouter");
 		proxyRouter = await ProxyRouter.deploy(
 			...[
 				"0x0000000000000000000000000000000000000000",
 				"0x0000000000000000000000000000000000000001",
-				"0x0000000000000000000000000000000000000001"
 			]
 		);
 		await proxyRouter.deployed();
@@ -102,6 +101,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: Transaction reverted without a reason string") {
 				throw new Error();
@@ -124,6 +124,7 @@ describe("ProxyRouter", function () {
 					0, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -140,6 +141,7 @@ describe("ProxyRouter", function () {
 					50, 1567801720, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -156,6 +158,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1777801720, 0, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -172,6 +175,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1777801720, 20000 * 10 ** 6, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -188,6 +192,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
 					1557801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -204,6 +209,7 @@ describe("ProxyRouter", function () {
 					50, 1757801720, 1777801720, 20000 * 10 ** 7, 0,
 					1767801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -220,6 +226,7 @@ describe("ProxyRouter", function () {
 					50, 1777801720, 1767801720, 20000 * 10 ** 7, 0,
 					1767801820, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -278,6 +285,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: Transaction reverted without a reason string") {
 				throw new Error();
@@ -310,6 +318,7 @@ describe("ProxyRouter", function () {
 					50, 0, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -326,6 +335,7 @@ describe("ProxyRouter", function () {
 					50, 1567801720, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -342,6 +352,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1777801720, 0, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -358,6 +369,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1777801720, 20000 * 10 ** 6, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -374,6 +386,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
 					1557801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -390,6 +403,7 @@ describe("ProxyRouter", function () {
 					50, 1757801720, 1777801720, 20000 * 10 ** 7, 0,
 					1767801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -434,6 +448,7 @@ describe("ProxyRouter", function () {
 					50, 1777801720, 1767801720, 20000 * 10 ** 7, 0,
 					1767801820, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -488,6 +503,7 @@ describe("ProxyRouter", function () {
 					50, 1, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -496,6 +512,16 @@ describe("ProxyRouter", function () {
 
 		await ethers.provider.send("evm_setNextBlockTimestamp", [1767801720])
 		await ethers.provider.send("evm_mine")
+
+		
+		await expect(proxyRouter.updateToken(tsCoin.address, [
+			50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+			1757801720, 0, 0, true, true, false
+		]))
+			.to.emit(proxyRouter, "TokenUpdated").withArgs([
+				50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+				1757801720, timestampBefore + 1, 0, true, true, false
+			]);
 
 		// 2
 		try {
@@ -507,6 +533,7 @@ describe("ProxyRouter", function () {
 					50, 1767803720, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -523,6 +550,7 @@ describe("ProxyRouter", function () {
 					50, 1767809720, 1777801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -578,6 +606,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
 					1, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -587,6 +616,15 @@ describe("ProxyRouter", function () {
 		await ethers.provider.send("evm_setNextBlockTimestamp", [1757801720])
 		await ethers.provider.send("evm_mine")
 
+		await expect(proxyRouter.updateToken(tsCoin.address, [
+			50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+			1757801720, 0, 0, true, true, false
+		]))
+			.to.emit(proxyRouter, "TokenUpdated").withArgs([
+				50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+				1757801720, timestampBefore + 1, 0, true, true, false
+			]);
+
 		// 2
 		try {
 			await expect(proxyRouter.updateToken(tsCoin.address, [
@@ -595,8 +633,9 @@ describe("ProxyRouter", function () {
 			]))
 				.to.emit(proxyRouter, "TokenUpdated").withArgs([
 					50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
-					175780720, timestampBefore + 1, 0, true, false, false
+					1757803720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -607,12 +646,13 @@ describe("ProxyRouter", function () {
 		try {
 			await expect(proxyRouter.updateToken(tsCoin.address, [
 				50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
-				1757801720, 0, 0, true, false, false
+				1757800720, 0, 0, true, false, false
 			]))
 				.to.emit(proxyRouter, "TokenUpdated").withArgs([
 					50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
-					1757801720, timestampBefore + 1, 0, true, false, false
+					1757800720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -668,6 +708,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -676,6 +717,16 @@ describe("ProxyRouter", function () {
 
 		await ethers.provider.send("evm_setNextBlockTimestamp", [1777801720])
 		await ethers.provider.send("evm_mine")
+
+		
+		await expect(proxyRouter.updateToken(tsCoin.address, [
+			50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+			1757801720, 0, 0, true, true, false
+		]))
+			.to.emit(proxyRouter, "TokenUpdated").withArgs([
+				50, 1767801720, 1777801720, 20000 * 10 ** 7, 0,
+				1757801720, timestampBefore + 1, 0, true, true, false
+			]);
 
 		// 2
 		try {
@@ -687,6 +738,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1776801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -703,6 +755,7 @@ describe("ProxyRouter", function () {
 					50, 1767801720, 1779801720, 20000 * 10 ** 7, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
 				throw new Error();
@@ -746,6 +799,7 @@ describe("ProxyRouter", function () {
 		try {
 			await expect(proxyRouter.deleteToken(tsCoin.address))
 				.to.emit(proxyRouter, "TokenDeleted").withArgs(tsCoin.address);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: Transaction reverted without a reason string") {
 				throw new Error();
@@ -757,6 +811,7 @@ describe("ProxyRouter", function () {
 		try {
 			await expect(proxyRouter.closeToken(tsCoin.address))
 				.to.emit(proxyRouter, "TokenClosed").withArgs(tsCoin.address);
+			throw new Error();
 		} catch (err) {
 			if (err.toString() !== "Error: Transaction reverted without a reason string") {
 				throw new Error();
@@ -809,27 +864,10 @@ describe("ProxyRouter", function () {
 		);
 		await referrals.deployed();
 
-		await expect(proxyRouter.updateReferralContractAddress(referrals.address))
+		await expect(proxyRouter.updateReferralContractAddress(referrals.address, true))
 			.to.emit(proxyRouter, "UpdateReferralContractAddress").withArgs(referrals.address);
 
 		expect((await proxyRouter.referralsContractAddress())).to.equal(referrals.address);
-
-	});
-
-	it("should update validatorContractAddress in ProxyRouter", async function () {
-		const Validator = await ethers.getContractFactory("Validator");
-		const validator = await Validator.deploy(
-			...[
-				"0x0000000000000000000000000000000000000000",
-                proxyRouter.address
-			]
-		);
-		await validator.deployed();
-
-		await expect(proxyRouter.updateValidatorContractAddress(validator.address))
-			.to.emit(proxyRouter, "UpdateValidatorContractAddress").withArgs(validator.address);
-
-		expect((await proxyRouter.validatorContractAddress())).to.equal(validator.address);
 
 	});
 

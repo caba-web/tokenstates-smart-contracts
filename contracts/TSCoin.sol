@@ -115,6 +115,8 @@ contract TSCoin is ERC20PausableAndBurnable {
     event AddInitApproval(address user, bool canUnpause);
     event RemoveInitApproval(address user);
 
+    uint256 public initTotalSupply;
+
     /**
      * @dev Initialize contract
      **/
@@ -127,7 +129,8 @@ contract TSCoin is ERC20PausableAndBurnable {
         address _initApproval
     ) ERC20(_name, _symbol, _decimals) {
         require(_initApproval != address(0));
-        _mint(_recipient, _initialSupply * 10**_decimals);
+        _mint(_recipient, _initialSupply * 10 ** _decimals);
+        initTotalSupply = _initialSupply * 10 ** _decimals;
         approvedAddresses[_initApproval] = ApprovedAddresses(true, true);
     }
 
