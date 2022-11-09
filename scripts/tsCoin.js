@@ -12,8 +12,8 @@ async function main(proxyRouterAddress = "0x000000000000000000000000000000000000
 
 	let args = [
 		proxyRouterAddress,
-		"TS Hotel",
-		"tsHT",
+		"TS Hotel Montenegro",
+		"tsHM",
 		18,
 		480000,
 		proxyRouterAddress
@@ -21,7 +21,7 @@ async function main(proxyRouterAddress = "0x000000000000000000000000000000000000
 
 	if (networkName === "bscTestnet") {
 		
-	} else if (networkName === "bscMainnet") {
+	} else if (networkName === "bsc") {
 		
 	} else {
 		throw new Error("Trying to deploy to unknown network");
@@ -42,7 +42,7 @@ async function main(proxyRouterAddress = "0x000000000000000000000000000000000000
 
 // We recommend this pattern to be able to use async/await everywhere
 // and properly handle errors.
-main("0x97eb8b6aB86AbE13347de0EaFFcBd62fD8b87D25")
+main("0xbcBD787C63346078585E76175a46CeE31ABdD22f")
 	.then(() => process.exit(0))
 	.catch((error) => {
 		console.error(error);

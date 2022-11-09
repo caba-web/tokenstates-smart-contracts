@@ -40,6 +40,7 @@ interface ReferralsContractInterface {
 
 interface TSCoinContract {
     function notPausable() external;
+    function initTotalSupply() view external returns(uint256);
 }
 
 contract ProxyRouter is Ownable, ReentrancyGuard {
@@ -236,7 +237,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _token.price == uint256(0) ||
             _token.claimTimestamp < block.timestamp ||
             _token.available == uint256(0) ||
-            IERC20(_tokenAddress).totalSupply() !=
+            TSCoinContract(_tokenAddress).initTotalSupply() !=
             _token.available + _token.sold ||
             _token.lastCallTimestamp < block.timestamp ||
             _token.claimTimestamp < _token.lastCallTimestamp ||
@@ -281,7 +282,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
                 (_updatingToken.claimTimestamp < block.timestamp ||
                     _token.claimTimestamp < block.timestamp)) ||
             _token.available == uint256(0) ||
-            IERC20(_tokenAddress).totalSupply() !=
+            TSCoinContract(_tokenAddress).initTotalSupply() !=
             _token.available + _token.sold ||
             (_token.lastCallTimestamp != _updatingToken.lastCallTimestamp &&
                 (_updatingToken.lastCallTimestamp < block.timestamp ||

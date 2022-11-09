@@ -22,7 +22,7 @@ async function main() {
 
 	if (networkName === "bscTestnet") {
 		
-	} else if (networkName === "bscMainnet") {
+	} else if (networkName === "bsc") {
 		
 	} else {
 		throw new Error("Trying to deploy to unknown network");

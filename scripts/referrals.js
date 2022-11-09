@@ -29,7 +29,7 @@ async function main(proxyRouterAddress = "0x000000000000000000000000000000000000
 
     if (networkName === "bscTestnet") {
 
-    } else if (networkName === "bscMainnet") {
+    } else if (networkName === "bsc") {
         
     } else {
         throw new Error("Trying to deploy to unknown network");

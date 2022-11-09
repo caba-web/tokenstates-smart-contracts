@@ -16,13 +16,11 @@ async function main() {
         args = [
             "0x337610d27c682E347C9cD60BD4b3b107C9d34dDd",
             "0x0000000000000000000000000000000000000000", //paste your value
-            "0x0000000000000000000000000000000000000000" //paste your value
         ];
-    } else if (networkName === "bscMainnet") {
+    } else if (networkName === "bsc") {
         args = [
-            "0x337610d27c682E347C9cD60BD4b3b107C9d34dDd",
+            "0x55d398326f99059ff775485246999027b3197955",
             "0x0000000000000000000000000000000000000000", //paste your value
-            "0x0000000000000000000000000000000000000000" //paste your value
         ];
     } else {
         throw new Error("Trying to deploy to unknown network");
@@ -31,16 +29,16 @@ async function main() {
     // console.log(await (await hre.ethers.getSigner()).getBalance())
 
     // Base deploy immutable
-    // const ProxyRouter = await hre.ethers.getContractFactory("ProxyRouter");
-    // const proxyRouter = await ProxyRouter.deploy(...args);
+    const ProxyRouter = await hre.ethers.getContractFactory("ProxyRouter");
+    const proxyRouter = await ProxyRouter.deploy(...args);
 
     // Deploying mutable
     // const ProxyRouter = await hre.ethers.getContractFactory("ProxyRouterUpgradeable");
     // const proxyRouter = await upgrades.deployProxy(ProxyRouter, args, {kind: "uups"});
 
     // Upgrading
-    const ProxyRouter = await ethers.getContractFactory("ProxyRouterUpgradeable");
-    const proxyRouter = await upgrades.upgradeProxy("0x97eb8b6aB86AbE13347de0EaFFcBd62fD8b87D25", ProxyRouter);
+    // const ProxyRouter = await ethers.getContractFactory("ProxyRouterUpgradeable");
+    // const proxyRouter = await upgrades.upgradeProxy("0x97eb8b6aB86AbE13347de0EaFFcBd62fD8b87D25", ProxyRouter);
 
     await proxyRouter.deployed();
 

@@ -13,7 +13,7 @@ task("addReferralChildToFather", "Adds referral child to father's account")
     if (networkName === "bscTestnet") {
         referralAddress = "0x0000000000000000000000000000000000000000"; //paste your value
 
-    } else if (networkName === "bscMainnet") {
+    } else if (networkName === "bsc") {
         referralAddress = "0x0000000000000000000000000000000000000000"; //paste your value
 
     } else if (networkName === "polygonTestnet") {
