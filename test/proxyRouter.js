@@ -308,23 +308,6 @@ describe("ProxyRouter", function () {
 				1757801720, timestampBefore + 1, 0, true, false, false
 			]);
 
-		// price == uint256(0)
-		try {
-			await expect(proxyRouter.updateToken(tsCoin.address, [
-				50, 0, 1777801720, 20000 * 10 ** 7, 0,
-				1757801720, 0, 0, true, false, false
-			]))
-				.to.emit(proxyRouter, "TokenUpdated").withArgs([
-					50, 0, 1777801720, 20000 * 10 ** 7, 0,
-					1757801720, timestampBefore + 1, 0, true, false, false
-				]);
-			throw new Error();
-		} catch (err) {
-			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
-				throw new Error();
-			}
-		}
-
 		// claimTimestamp less then current block.timestamp
 		try {
 			await expect(proxyRouter.updateToken(tsCoin.address, [
@@ -333,40 +316,6 @@ describe("ProxyRouter", function () {
 			]))
 				.to.emit(proxyRouter, "TokenUpdated").withArgs([
 					50, 1567801720, 1777801720, 20000 * 10 ** 7, 0,
-					1757801720, timestampBefore + 1, 0, true, false, false
-				]);
-			throw new Error();
-		} catch (err) {
-			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
-				throw new Error();
-			}
-		}
-
-		// available == uint256(0)
-		try {
-			await expect(proxyRouter.updateToken(tsCoin.address, [
-				50, 1767801720, 1777801720, 0, 0,
-				1757801720, 0, 0, true, false, false
-			]))
-				.to.emit(proxyRouter, "TokenUpdated").withArgs([
-					50, 1767801720, 1777801720, 0, 0,
-					1757801720, timestampBefore + 1, 0, true, false, false
-				]);
-			throw new Error();
-		} catch (err) {
-			if (err.toString() !== "Error: VM Exception while processing transaction: reverted with custom error 'InvalidTokenData()'") {
-				throw new Error();
-			}
-		}
-
-		// totalSupply != available + sold
-		try {
-			await expect(proxyRouter.updateToken(tsCoin.address, [
-				50, 1767801720, 1777801720, 20000 * 10 ** 6, 0,
-				1757801720, 0, 0, true, false, false
-			]))
-				.to.emit(proxyRouter, "TokenUpdated").withArgs([
-					50, 1767801720, 1777801720, 20000 * 10 ** 6, 0,
 					1757801720, timestampBefore + 1, 0, true, false, false
 				]);
 			throw new Error();

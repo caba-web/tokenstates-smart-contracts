@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: Unlicense
+//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -200,6 +200,40 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
         // send referrals, check for collected
     }
 
+    function adminBuy(
+        address _tokenAddress,
+        address _from,
+        uint256 _amount
+    ) public onlyOwner isTokenActive(_tokenAddress, true) {
+        Structs.Token memory _token = tokens[_tokenAddress];
+
+        uint256 _amountToBuy = _amount / _token.price;
+
+        require(
+            _amountToBuy >=
+                MINIMUM_AMOUNT_TO_BUY
+        );
+
+        IERC20 _purchasingToken = IERC20(_tokenAddress);
+        tokens[_tokenAddress].available -= _amountToBuy;
+        tokens[_tokenAddress].sold += _amountToBuy;
+        _purchasingToken.safeTransfer(_from, _amountToBuy);
+
+        _sendReferrals(_amount, _from);
+        _checkTokensAreCollectedAfter(_tokenAddress);
+
+        emit Buy(
+            _tokenAddress,
+            _from,
+            true,
+            _amount,
+            _amountToBuy,
+            _token.price
+        );
+
+        // send referrals, check for collected
+    }
+
     /** @dev Refund tokens if amount not collected
      * @param _tokenAddress address of the buying token.
      * @param _amount amount of ts.
@@ -281,9 +315,6 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             (_token.claimTimestamp != _updatingToken.claimTimestamp &&
                 (_updatingToken.claimTimestamp < block.timestamp ||
                     _token.claimTimestamp < block.timestamp)) ||
-            _token.available == uint256(0) ||
-            TSCoinContract(_tokenAddress).initTotalSupply() !=
-            _token.available + _token.sold ||
             (_token.lastCallTimestamp != _updatingToken.lastCallTimestamp &&
                 (_updatingToken.lastCallTimestamp < block.timestamp ||
                     _token.lastCallTimestamp < block.timestamp)) ||
@@ -292,9 +323,7 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
                 (_updatingToken.limitTimestamp < block.timestamp ||
                     _token.limitTimestamp < block.timestamp)) ||
             (_updatingToken.isActive &&
-                _token.limitTimestamp < _token.claimTimestamp) ||
-            (!_updatingToken.isActive &&
-                _token.limitTimestamp < _token.lastCallTimestamp)
+                _token.limitTimestamp < _token.claimTimestamp)
         ) {
             revert Errors.InvalidTokenData();
         }
@@ -302,8 +331,8 @@ contract ProxyRouter is Ownable, ReentrancyGuard {
             _updatingToken.price,
             _token.claimTimestamp,
             _token.limitTimestamp,
-            _token.available,
-            _token.sold,
+            _updatingToken.available,
+            _updatingToken.sold,
             _token.lastCallTimestamp,
             _updatingToken.createdTimestamp,
             _updatingToken.closedTimestamp,

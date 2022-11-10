@@ -72,6 +72,52 @@ describe("ProxyRouter-Main", function () {
             .to.emit(tsCoin, "Transfer").withArgs(proxyRouter.address, user1.address, ethers.utils.parseEther("1"));
     });
 
+    it("should adminBuy token at ProxyRouter", async function () {
+        const blockNumBefore = await ethers.provider.getBlockNumber();
+        const blockBefore = await ethers.provider.getBlock(blockNumBefore);
+        const timestampBefore = blockBefore.timestamp;
+
+        await expect(proxyRouter.createToken(tsCoin.address, [
+            50, 1767801720, 1777801720, ethers.BigNumber.from(1000000).mul(DECIMAL), 0,
+            1757801720, 0, 0, true, false, false
+        ]))
+            .to.emit(proxyRouter, "TokenAdded").withArgs([
+                50, 1767801720, 1777801720, ethers.BigNumber.from(1000000).mul(DECIMAL), 0,
+                1757801720, timestampBefore + 1, 0, true, false, false
+            ]);
+
+        await expect(proxyRouter.adminBuy(tsCoin.address, user1.address, ethers.utils.parseEther("50")))
+            .to.emit(proxyRouter, "Buy").withArgs(tsCoin.address, user1.address, true, ethers.utils.parseEther("50"), ethers.utils.parseEther("1"), 50)
+            .to.emit(tsCoin, "Transfer").withArgs(proxyRouter.address, user1.address, ethers.utils.parseEther("1"));
+    });
+
+    it("should panic adminBuy token if not owner at ProxyRouter", async function () {
+        const blockNumBefore = await ethers.provider.getBlockNumber();
+        const blockBefore = await ethers.provider.getBlock(blockNumBefore);
+        const timestampBefore = blockBefore.timestamp;
+
+        await expect(proxyRouter.createToken(tsCoin.address, [
+            50, 1767801720, 1777801720, ethers.BigNumber.from(1000000).mul(DECIMAL), 0,
+            1757801720, 0, 0, true, false, false
+        ]))
+            .to.emit(proxyRouter, "TokenAdded").withArgs([
+                50, 1767801720, 1777801720, ethers.BigNumber.from(1000000).mul(DECIMAL), 0,
+                1757801720, timestampBefore + 1, 0, true, false, false
+            ]);
+        
+        try {
+            await expect(proxyRouter.connect(user1).adminBuy(tsCoin.address, user1.address, ethers.utils.parseEther("50")))
+                .to.emit(proxyRouter, "Buy").withArgs(tsCoin.address, user1.address, true, ethers.utils.parseEther("50"), ethers.utils.parseEther("1"), 50)
+                .to.emit(tsCoin, "Transfer").withArgs(proxyRouter.address, user1.address, ethers.utils.parseEther("1"));
+
+        } catch (err) {
+            if (err.toString() === "Error: VM Exception while processing transaction: reverted with reason string 'Ownable: caller is not the owner'") {
+                return;
+            }
+        }
+        throw new Error();
+    });
+
     it("should panic on buy token if amount too low at ProxyRouter", async function () {
         const blockNumBefore = await ethers.provider.getBlockNumber();
         const blockBefore = await ethers.provider.getBlock(blockNumBefore);
