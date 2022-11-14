@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: Unlicense
+//SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -17,10 +17,10 @@ library Structs {
         bool isPresent;
         uint256 percent;
     }
-    struct Token {
-        PayoutBonds[] payoutBonds;
-        mapping(uint256 => Structs.UsedDates) usedDates;
-        mapping(uint256 => bool) passedDates;
+    struct Token { 
+        mapping(uint256 => uint256) timestampToPercent;
+        uint256[] usedTimestamps;
+        uint256 lastTimestamp;
         bool wasSomethingLocked;
         bool isPresent;
         bool isPaused;
@@ -47,19 +47,11 @@ library Errors {
     error UnknownFunctionId();
 }
 
-interface ProxyRouterContractInterface {
-    function tokens(address _tokenAddress) external view;
-}
-
 contract Validator is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
     using BokkyPooBahsDateTimeLibrary for uint256;
 
     IERC20 public immutable token; // usdt token.
-
-    ProxyRouterContractInterface internal proxyRouterContract;
-
-    address public proxyRouterContractAddress;
 
     uint256 public constant AMOUNT_OF_MONTHS_TO_UNLOCK = 6;
 
@@ -69,34 +61,30 @@ contract Validator is Ownable, ReentrancyGuard {
     mapping(address => Structs.EarnedAndToClaim) public userEarned;
 
     // Events
-    event TokensLocked(
-        address indexed tokenAddress,
-        address indexed user,
-        uint256 amount,
-        uint256 timestamp
-    );
     event TokenAdded(address tokenAddress);
     event TokenUpdated(address tokenAddress, bool isPaused);
     event TokenDeleted(address tokenAddress);
-    event UpdateProxyRouterContractAddress(address proxyRouterContractAddress);
+
+    event AddedNewTokenPayoutBond(address indexed tokenAddress, uint256 timestamp, uint256 percent);
+    event EditTokenPayoutBond(address indexed tokenAddress, uint256 timestamp, uint256 percent);
+    event DeletedTokenPayoutBond(address indexed tokenAddress, uint256 timestamp);
+
+    event PayoutERC20(address tokenAddress, address to, uint256 amount);
 
     event Locked(
         address tokenAddress,
         address user,
-        uint256 amount,
-        uint256 timestamp
+        uint256 amount
     );
     event Unlocked(
         address tokenAddress,
         address user,
-        uint256 amount,
-        uint256 timestamp
+        uint256 amount
     );
     event Claimed(
         address tokenAddress,
         address user,
-        uint256 amount,
-        uint256 timestamp
+        uint256 amount
     );
 
     event Payout(address to, uint256 amount);
@@ -116,12 +104,8 @@ contract Validator is Ownable, ReentrancyGuard {
 
     /** @dev Initializes contract
      */
-    constructor(IERC20 _token, address _proxyRouterContractAddress) {
+    constructor(IERC20 _token) {
         token = _token;
-        proxyRouterContract = ProxyRouterContractInterface(
-            _proxyRouterContractAddress
-        );
-        proxyRouterContractAddress = _proxyRouterContractAddress;
     }
 
     /** @dev Locks tokens. Receives earnings
@@ -145,12 +129,12 @@ contract Validator is Ownable, ReentrancyGuard {
         isTokenActive(_tokenAddress)
         nonReentrant
     {
-        calculateEarnings(_tokenAddress, msg.sender);
-        recalculateMonths(_tokenAddress, msg.sender);
-        unlock(_tokenAddress, msg.sender, _amount);
+        _calculateEarnings(_tokenAddress, msg.sender);
+        _recalculateMonths(_tokenAddress, msg.sender);
+        _unlock(_tokenAddress, msg.sender, _amount);
         IERC20 _lockedToken = IERC20(_tokenAddress);
         _lockedToken.safeTransfer(msg.sender, _amount);
-        emit Unlocked(_tokenAddress, msg.sender, _amount, block.timestamp);
+        emit Unlocked(_tokenAddress, msg.sender, _amount);
     }
 
     /** @dev Claims earnings from locked token.
@@ -162,11 +146,11 @@ contract Validator is Ownable, ReentrancyGuard {
         isTokenActive(_tokenAddress)
         nonReentrant
     {
-        calculateEarnings(_tokenAddress, msg.sender);
-        recalculateMonths(_tokenAddress, msg.sender);
+        _calculateEarnings(_tokenAddress, msg.sender);
+        _recalculateMonths(_tokenAddress, msg.sender);
         userEarned[msg.sender].toClaim -= _amount;
         token.transfer(msg.sender, _amount);
-        emit Claimed(_tokenAddress, msg.sender, _amount, block.timestamp);
+        emit Claimed(_tokenAddress, msg.sender, _amount);
     }
 
     /** @dev Creates token. Called only by proxyrouter
@@ -207,82 +191,104 @@ contract Validator is Ownable, ReentrancyGuard {
     {
         Structs.Token storage _token = tokens[_tokenAddress];
         require(
-            _token.wasSomethingLocked,
+            !_token.wasSomethingLocked,
             "Something was locked already. Cannot delete token"
         );
-        for (uint256 i = 0; i < _token.payoutBonds.length; i++) {
-            delete _token.usedDates[_token.payoutBonds[i].timestamp];
-            delete _token.passedDates[_token.payoutBonds[i].timestamp];
+        for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
+            delete tokens[_tokenAddress].timestampToPercent[ _token.usedTimestamps[i]];
         }
         delete tokens[_tokenAddress];
         emit TokenDeleted(_tokenAddress);
     }
 
-    /** @dev Updates referrals contractAddress
-     * @param _proxyRouterContractAddress address of new contract.
+    /** @dev Adds tokens payout bonds
+     * @param _tokenAddress address of the contract.
+     * @param _timestamp unix timestamp of the bond payment.
+     * @param _percent percent of the bond payment.
      */
-    function updateProxyRouterContractAddress(
-        address _proxyRouterContractAddress
-    ) public onlyOwner {
-        proxyRouterContract = ProxyRouterContractInterface(
-            _proxyRouterContractAddress
-        );
-        proxyRouterContractAddress = _proxyRouterContractAddress;
-        emit UpdateProxyRouterContractAddress(_proxyRouterContractAddress);
+    function addTokensPayoutBonds(
+        address _tokenAddress,
+        uint256 _timestamp,
+        uint256 _percent
+    ) public isTokenPresent(_tokenAddress, true) onlyOwner {
+        if (
+            _timestamp <= block.timestamp || 
+            _timestamp <= tokens[_tokenAddress].lastTimestamp ||
+            _percent == uint256(0) ||
+            _percent > uint256(10_000) ||
+            tokens[_tokenAddress].timestampToPercent[_timestamp] != uint256(0)
+            ) {
+            revert Errors.InvalidBondData();
+        }
+
+        tokens[_tokenAddress].timestampToPercent[_timestamp] = _percent;
+        tokens[_tokenAddress].usedTimestamps.push(_timestamp);
+        tokens[_tokenAddress].lastTimestamp = _timestamp;   
+
+        emit AddedNewTokenPayoutBond(_tokenAddress, _timestamp, _percent);
     }
 
     /** @dev Adds tokens payout bonds
      * @param _tokenAddress address of the contract.
-     * @param _data Structs.PayoutBonds[] objects array {timestamp, percentForPrevMonths}.
+     * @param _timestamp unix timestamp of the bond payment.
+     * @param _percent percent of the bond payment.
      */
-    function addTokensPayoutBonds(
+    function editTokensPayoutBonds(
         address _tokenAddress,
-        Structs.PayoutBonds[] memory _data
+        uint256 _timestamp,
+        uint256 _percent
     ) public isTokenPresent(_tokenAddress, true) onlyOwner {
+        if (
+            _timestamp <= block.timestamp || 
+            _percent == uint256(0) ||
+            _percent > uint256(10_000) ||
+            tokens[_tokenAddress].timestampToPercent[_timestamp] == uint256(0)
+            ) {
+            revert Errors.InvalidBondData();
+        }
+
+        tokens[_tokenAddress].timestampToPercent[_timestamp] = _percent;
+
+        emit EditTokenPayoutBond(_tokenAddress, _timestamp, _percent);
+    }
+
+    /** @dev Adds tokens payout bonds
+     * @param _tokenAddress address of the contract.
+     * @param _timestamp unix timestamp of the bond payment.
+     */
+    function deleteTokensPayoutBonds(
+        address _tokenAddress,
+        uint256 _timestamp
+    ) public isTokenPresent(_tokenAddress, true) onlyOwner {
+        if (
+            _timestamp <= block.timestamp || 
+            tokens[_tokenAddress].timestampToPercent[_timestamp] == uint256(0)
+            ) {
+            revert Errors.InvalidBondData();
+        }
+
         Structs.Token storage _token = tokens[_tokenAddress];
 
-        uint256 _prevTimestamp;
+        delete tokens[_tokenAddress].timestampToPercent[_timestamp];
 
-        for (uint256 i = 0; i < _token.payoutBonds.length; i++) {
-            if (_token.payoutBonds[i].timestamp < block.timestamp) {
-                tokens[_tokenAddress].passedDates[
-                    _token.payoutBonds[i].timestamp
-                ] = true;
-            } else {
+        for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
+            if (_token.usedTimestamps[i] == _timestamp) {
+                tokens[_tokenAddress].usedTimestamps[i] = _token
+                    .usedTimestamps[_token.usedTimestamps.length - 1];
+                tokens[_tokenAddress].usedTimestamps.pop();
                 break;
             }
         }
 
-        Structs.Token storage _tokenSecondary = tokens[_tokenAddress];
-
-        // array is unlimitted
-        // если дата присутствует то ее можно изменить только если ее таймштамп еще не прошел
-        for (uint256 i = 0; i < _data.length; i++) {
-            if (
-                _data[i].timestamp < _prevTimestamp ||
-                (_tokenSecondary.passedDates[_data[i].timestamp] && //Дата прошла true && percent != newPercent => err
-                    _tokenSecondary.usedDates[_data[i].timestamp].percent !=
-                    _data[i].percent)
-            ) {
-                revert Errors.InvalidBondData();
-            }
-            _prevTimestamp = _data[i].timestamp;
+        if (_token.usedTimestamps.length == 0) {
+            tokens[_tokenAddress].lastTimestamp = uint256(0);   
+        } else if (_timestamp == _token.lastTimestamp) {
+            tokens[_tokenAddress].lastTimestamp = _token.usedTimestamps[_token.usedTimestamps.length - 1];
         }
 
-        for (uint256 i = 0; i < _token.payoutBonds.length; i++) {
-            delete tokens[_tokenAddress].passedDates[
-                _token.payoutBonds[i].timestamp
-            ];
-            delete tokens[_tokenAddress].usedDates[
-                _token.payoutBonds[i].timestamp
-            ];
-        }
-
-        for (uint256 i = 0; i < _data.length; i++) {
-            tokens[_tokenAddress].usedDates[_data[i].timestamp] = Structs
-                .UsedDates(true, _data[i].percent);
-        }
+        emit DeletedTokenPayoutBond(_tokenAddress, _timestamp);
     }
+
 
     /** @dev withdraws value from contract.
      * @param _amount *
@@ -296,6 +302,19 @@ contract Validator is Ownable, ReentrancyGuard {
         require(success, "Transfer failed.");
 
         emit Payout(msg.sender, _amount);
+    }
+
+    /** @dev withdraws value from contract.
+     * @param _tokenAddress *
+     * @param _amount *
+     */
+    function withdrawERC20(address _tokenAddress, uint256 _amount)
+        public
+        onlyOwner
+    {
+        IERC20 _token = IERC20(_tokenAddress);
+        _token.safeTransfer(msg.sender, _amount);
+        emit PayoutERC20(_tokenAddress, msg.sender, _amount);
     }
 
     function onTokenTransfer(
@@ -314,8 +333,24 @@ contract Validator is Ownable, ReentrancyGuard {
         }
     }
 
-    function getWRequest(address _tokenAddress, address _user, uint256 _index) public view returns (Structs.LockedTokensSecondary memory) {
+    function getOtherTokensLength(address _tokenAddress, address _user) public view returns (uint256) {
+        return userTokens[_tokenAddress][_user].otherTokens.length;
+    }
+
+    function getTokensUsedTimestampsLength(address _tokenAddress) public view returns (uint256) {
+        return tokens[_tokenAddress].usedTimestamps.length;
+    }
+
+    function getOtherTokensByIndex(address _tokenAddress, address _user, uint256 _index) public view returns (Structs.LockedTokensSecondary memory) {
         return userTokens[_tokenAddress][_user].otherTokens[_index];
+    }
+
+    function getTokensUsedTimestampsByIndex(address _tokenAddress, uint256 _index) public view returns (uint256) {
+        return tokens[_tokenAddress].usedTimestamps[_index];
+    }
+
+    function getTokensTimestampToPercent(address _tokenAddress, uint256 _timestamp) public view returns (uint256) {
+        return tokens[_tokenAddress].timestampToPercent[_timestamp];
     }
 
     function _lock(
@@ -323,7 +358,7 @@ contract Validator is Ownable, ReentrancyGuard {
         address _from,
         uint256 _amount
     ) internal isTokenActive(_tokenAddress) {
-        recalculateMonths(_tokenAddress, _from);
+        _recalculateMonths(_tokenAddress, _from);
         IERC20 _lockingToken = IERC20(_tokenAddress);
         _lockingToken.safeTransferFrom(_from, address(this), _amount);
 
@@ -332,22 +367,22 @@ contract Validator is Ownable, ReentrancyGuard {
         ];
         if (_userTokens.initLocked == uint256(0)) {
             userTokens[_tokenAddress][_from].initLocked = _amount;
-            userTokens[_tokenAddress][_from].initTimeCreate = newDate(
+            userTokens[_tokenAddress][_from].initTimeCreate = _newDate(
                 block.timestamp
             );
-            userTokens[_tokenAddress][_from].lastCalculationTimestamp = newDate(
+            userTokens[_tokenAddress][_from].lastCalculationTimestamp = _newDate(
                 block.timestamp
             );
-        } else if (_userTokens.initTimeCreate == newDate(block.timestamp)) {
+        } else if (_userTokens.initTimeCreate == _newDate(block.timestamp)) {
             userTokens[_tokenAddress][_from].initLocked += _amount;
         } else {
-            addOtherTokens(_tokenAddress, _from, _amount);
+            _addOtherTokens(_tokenAddress, _from, _amount);
         }
         tokens[_tokenAddress].wasSomethingLocked = true;
-        emit Locked(_tokenAddress, _from, _amount, block.timestamp);
+        emit Locked(_tokenAddress, _from, _amount);
     }
 
-    function addOtherTokens(
+    function _addOtherTokens(
         address _tokenAddress,
         address _user,
         uint256 _amount
@@ -376,13 +411,13 @@ contract Validator is Ownable, ReentrancyGuard {
             }
         }
 
-        uint256 _newTimestamp = newDate(block.timestamp);
+        uint256 _newTimestamp = _newDate(block.timestamp);
         userTokens[_tokenAddress][_user].otherTokens.push(
             Structs.LockedTokensSecondary(_newTimestamp, _amount)
         );
     }
 
-    function calculateEarnings(address _tokenAddress, address _user) internal {
+    function _calculateEarnings(address _tokenAddress, address _user) internal {
         Structs.LockedTokens memory _userTokens;
         _userTokens = userTokens[_tokenAddress][_user];
         Structs.Token storage _token = tokens[_tokenAddress];
@@ -403,13 +438,13 @@ contract Validator is Ownable, ReentrancyGuard {
         );
         uint256 _earnings;
         if (_monthsInit > AMOUNT_OF_MONTHS_TO_UNLOCK && _months != 0) {
-            for (uint256 i = 0; i < _token.payoutBonds.length; i++) {
+            for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
                 if (
-                    _token.payoutBonds[i].timestamp >
+                    _token.usedTimestamps[i] >
                     _userTokens.lastCalculationTimestamp
                 ) {
                     uint256 _initEarnings = (_userTokens.initLocked *
-                        _token.payoutBonds[i].percent) / 10_000;
+                        _token.timestampToPercent[_token.usedTimestamps[i]]) / 10_000;
                     _earnings += _initEarnings;
 
                     for (
@@ -433,7 +468,7 @@ contract Validator is Ownable, ReentrancyGuard {
                             .otherTokens[ii]
                             .amount *
                             _monthsOtherTokensDiff *
-                            _token.payoutBonds[i].percent) /
+                             _token.timestampToPercent[_token.usedTimestamps[i]]) /
                             (10_000 * AMOUNT_OF_MONTHS_TO_UNLOCK);
                         _earnings += (
                             _othetTokensEarnings <= _initEarnings
@@ -490,7 +525,7 @@ contract Validator is Ownable, ReentrancyGuard {
         }
     }
 
-    function recalculateMonths(address _tokenAddress, address _user) internal {
+    function _recalculateMonths(address _tokenAddress, address _user) internal {
         // push other tokens to init if month > 6
 
         uint256 _deleted;
@@ -517,7 +552,7 @@ contract Validator is Ownable, ReentrancyGuard {
         }
     }
 
-    function unlock(
+    function _unlock(
         address _tokenAddress,
         address _user,
         uint256 _amount
@@ -562,7 +597,7 @@ contract Validator is Ownable, ReentrancyGuard {
         return;
     }
 
-    function newDate(uint256 _timestamp) internal pure returns (uint256) {
+    function _newDate(uint256 _timestamp) internal pure returns (uint256) {
         (, , uint256 _todayDay) = BokkyPooBahsDateTimeLibrary.timestampToDate(
             _timestamp
         );

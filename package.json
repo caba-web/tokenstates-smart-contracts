@@ -21,11 +21,11 @@
     "hardhat": "^2.9.9"
   },
   "dependencies": {
-    "@chainlink/contracts": "^0.4.0",
     "@ethersproject/strings": "^5.7.0",
     "@openzeppelin/contracts": "^4.5.0",
     "anydesk-api": "^0.0.2",
     "dotenv": "^16.0.1",
-    "hardhat-gas-reporter": "^1.0.8"
+    "hardhat-gas-reporter": "^1.0.8",
+    "moment": "^2.29.4"
   }
 }
