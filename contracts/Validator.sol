@@ -69,8 +69,6 @@ contract Validator is Ownable, ReentrancyGuard {
     event EditTokenPayoutBond(address indexed tokenAddress, uint256 timestamp, uint256 percent);
     event DeletedTokenPayoutBond(address indexed tokenAddress, uint256 timestamp);
 
-    event PayoutERC20(address tokenAddress, address to, uint256 amount);
-
     event Locked(
         address tokenAddress,
         address user,
@@ -88,6 +86,7 @@ contract Validator is Ownable, ReentrancyGuard {
     );
 
     event Payout(address to, uint256 amount);
+    event PayoutERC20(address tokenAddress, address to, uint256 amount);
     event Credited(address from, uint256 amount);
 
     modifier isTokenPresent(address _tokenAddress, bool _bool) {
@@ -358,6 +357,7 @@ contract Validator is Ownable, ReentrancyGuard {
         address _from,
         uint256 _amount
     ) internal isTokenActive(_tokenAddress) {
+        _calculateEarnings(_tokenAddress, _from);
         _recalculateMonths(_tokenAddress, _from);
         IERC20 _lockingToken = IERC20(_tokenAddress);
         _lockingToken.safeTransferFrom(_from, address(this), _amount);
@@ -440,8 +440,8 @@ contract Validator is Ownable, ReentrancyGuard {
         if (_monthsInit > AMOUNT_OF_MONTHS_TO_UNLOCK && _months != 0) {
             for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
                 if (
-                    _token.usedTimestamps[i] >
-                    _userTokens.lastCalculationTimestamp
+                    _userTokens.initTimeCreate < _token.usedTimestamps[i] &&
+                    _userTokens.lastCalculationTimestamp < _token.usedTimestamps[i]
                 ) {
                     uint256 _initEarnings = (_userTokens.initLocked *
                         _token.timestampToPercent[_token.usedTimestamps[i]]) / 10_000;
@@ -449,23 +449,23 @@ contract Validator is Ownable, ReentrancyGuard {
 
                     for (
                         uint256 ii = 0;
-                        ii < _userTokens.otherTokens.length;
+                        ii < _userTokens.otherTokens.length + _deleted;
                         ii++
                     ) {
                         if (
-                            _userTokens.otherTokens[ii].timestamp >
+                            _userTokens.otherTokens[ii - _deleted].timestamp >
                             block.timestamp
                         ) {
                             break;
                         }
                         uint256 _monthsOtherTokensDiff = BokkyPooBahsDateTimeLibrary
                                 .diffMonths(
-                                    _userTokens.otherTokens[ii].timestamp,
+                                    _userTokens.otherTokens[ii - _deleted].timestamp,
                                     block.timestamp
                                 );
 
                         uint256 _othetTokensEarnings = (_userTokens
-                            .otherTokens[ii]
+                            .otherTokens[ii - _deleted]
                             .amount *
                             _monthsOtherTokensDiff *
                              _token.timestampToPercent[_token.usedTimestamps[i]]) /
@@ -480,7 +480,7 @@ contract Validator is Ownable, ReentrancyGuard {
                         ) {
                             // reset months
                             userTokens[_tokenAddress][_user].otherTokens[
-                                    i
+                                    ii - _deleted
                                 ] = _userTokens.otherTokens[
                                 _userTokens.otherTokens.length - 1 - _deleted
                             ];
@@ -489,11 +489,11 @@ contract Validator is Ownable, ReentrancyGuard {
                             // update initLocked
                             userTokens[_tokenAddress][_user]
                                 .initLocked += _userTokens
-                                .otherTokens[ii]
+                                .otherTokens[ii - _deleted]
                                 .amount;
 
                             _userTokens.initLocked += _userTokens
-                                .otherTokens[ii]
+                                .otherTokens[ii - _deleted]
                                 .amount;
 
                             _deleted++;
@@ -535,12 +535,12 @@ contract Validator is Ownable, ReentrancyGuard {
         ];
 
         // array is limited to 6 elems
-        for (uint256 i = 0; i < _userTokens.otherTokens.length; i++) {
-            if (_userTokens.otherTokens[i].timestamp > block.timestamp) {
+        for (uint256 i = 0; i < _userTokens.otherTokens.length + _deleted; i++) {
+            if (_userTokens.otherTokens[i - _deleted].timestamp > block.timestamp) {
                 break;
             }
             uint256 _months = BokkyPooBahsDateTimeLibrary.diffMonths(
-                _userTokens.otherTokens[i].timestamp,
+                _userTokens.otherTokens[i - _deleted].timestamp,
                 block.timestamp
             );
             if (_months >= AMOUNT_OF_MONTHS_TO_UNLOCK) {
@@ -564,21 +564,21 @@ contract Validator is Ownable, ReentrancyGuard {
         uint256 _deleted;
 
         // array is limited to 6 elems
-        for (uint256 i = _userTokens.otherTokens.length; i > 0; i--) {
+        for (uint256 i = _userTokens.otherTokens.length; i > 0 + _deleted; i--) {
             (bool _success, ) = SafeMath.trySub(
-                _userTokens.otherTokens[i - 1].amount,
+                _userTokens.otherTokens[i - 1 - _deleted].amount,
                 _amount
             );
             if (_success) {
                 userTokens[_tokenAddress][_user]
-                    .otherTokens[i - 1]
+                    .otherTokens[i - 1 - _deleted]
                     .amount -= _amount;
                 return;
             }
-            userTokens[_tokenAddress][_user].otherTokens[i - 1] = _userTokens
+            userTokens[_tokenAddress][_user].otherTokens[i - 1 - _deleted] = _userTokens
                 .otherTokens[_userTokens.otherTokens.length - 1 - _deleted];
             userTokens[_tokenAddress][_user].otherTokens.pop();
-            _amount -= _userTokens.otherTokens[i - 1].amount;
+            _amount -= _userTokens.otherTokens[i - 1 - _deleted].amount;
             _deleted++;
         }
 
