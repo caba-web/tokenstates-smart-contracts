@@ -42,7 +42,7 @@ async function main(proxyRouterAddress = "0x000000000000000000000000000000000000
 
 // We recommend this pattern to be able to use async/await everywhere
 // and properly handle errors.
-main("0x071a03D627B6989680479290610A6e48b96f7f80")
+main("0x5f08c8D3Cd8Ee8FF60bBB39a5310bd1384bc427A")
 	.then(() => process.exit(0))
 	.catch((error) => {
 		console.error(error);

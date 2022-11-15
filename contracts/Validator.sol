@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "./ERC20/utils/SafeERC20.sol";
 import "./utils/datetime/BokkyPooBahsDateTimeLibrary.sol";
-import "hardhat/console.sol";
 
 library Structs {
     struct Token { 
@@ -694,8 +693,6 @@ contract Validator is Ownable, ReentrancyGuard {
     }
 
     function _deleteFromUserTokens(address _tokenAddress, address _user, uint256 _index) internal {
-        // console.log("length", userTokens[_tokenAddress][_user].otherTokens.length);
-        // console.log("timestamp",  userTokens[_tokenAddress][_user].otherTokens[_index].timestamp);
         for(uint i = _index; i < userTokens[_tokenAddress][_user].otherTokens.length - 1; i++){
             userTokens[_tokenAddress][_user].otherTokens[i] = userTokens[_tokenAddress][_user].otherTokens[i + 1];      
         }

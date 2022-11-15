@@ -5,7 +5,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "./ERC20/utils/SafeERC20.sol";
-import "hardhat/console.sol";
 
 library Structs {
     struct Token {

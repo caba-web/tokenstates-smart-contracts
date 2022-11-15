@@ -10,8 +10,8 @@ async function main() {
     const [owner] = await ethers.getSigners();
 
     const ProxyRouter = await hre.ethers.getContractFactory("ProxyRouter");
-    const proxyRouter = ProxyRouter.attach("0x071a03D627B6989680479290610A6e48b96f7f80");
-    let tsCoinAddress = "0x6a54278cD9D9b89697aD94Fea252dF9b5164f952";
+    const proxyRouter = ProxyRouter.attach("0x5f08c8D3Cd8Ee8FF60bBB39a5310bd1384bc427A");
+    let tsCoinAddress = "0xD04b2388BcC8ab4406A8EEf9A9540e225C0f9f28";
  
     DECIMAL = ethers.BigNumber.from(10).pow(18)
 

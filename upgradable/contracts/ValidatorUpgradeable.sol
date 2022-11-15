@@ -1,27 +1,19 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/math/SafeMathUpgradeable.sol";
 import "./ERC20/utils/SafeERC20.sol";
 import "./utils/datetime/BokkyPooBahsDateTimeLibrary.sol";
 
 library Structs {
-    struct PayoutBonds {
-        uint256 timestamp;
-        uint256 percent;
-    }
-    struct UsedDates {
-        bool isPresent;
-        uint256 percent;
-    }
-    struct Token {
-        PayoutBonds[] payoutBonds;
-        mapping(uint256 => Structs.UsedDates) usedDates;
-        mapping(uint256 => bool) passedDates;
+    struct Token { 
+        mapping(uint256 => uint256) timestampToPercent;
+        uint256[] usedTimestamps;
+        uint256 lastTimestamp;
         bool wasSomethingLocked;
         bool isPresent;
         bool isPaused;
@@ -34,20 +26,38 @@ library Structs {
     struct LockedTokens {
         uint256 initLocked;
         uint256 initTimeCreate;
-        uint256 toClaim;
-        uint256 earned;
         uint256 lastCalculationTimestamp;
         LockedTokensSecondary[] otherTokens;
     }
+    struct EarnedAndToClaim {
+        uint256 earned;
+        uint256 toClaim;
+    }
+}
+
+interface ProxyRouterInterface {
+    struct Token {
+        uint256 price; // price for the token. Used for buy bond, return bond, return bond after bad collecting
+        uint256 claimTimestamp; // timestamp when the bond will be available for return, is changable if more lastCallTimestamp
+        uint256 limitTimestamp; // timestamp when the bond will be not available for return anymore
+        uint256 available; // shows how much tokens are left for sale
+        uint256 sold; // shows how many tokens have been sold
+        uint256 lastCallTimestamp; // timestamp when project must sell all the tokens
+        uint256 createdTimestamp; // shows if project is real
+        uint256 closedTimestamp; // timestamp whe project is closed either by admin or automaticly
+        bool isActive; // shows if project is active, can be false if project did not collect all the money by set time
+        bool isPaused; // shows if token selling is still active
+        bool isCollected; // shows if project has collected all money, can be set by admin. Allowed to sell even after true
+    }
+    function tokens(address _tokenAddress)
+        external
+        view
+        returns (Token memory);
 }
 
 library Errors {
     error InvalidBondData();
     error UnknownFunctionId();
-}
-
-interface ProxyRouterContractInterface {
-    function tokens(address _tokenAddress) external view;
 }
 
 contract ValidatorUpgradeable is Initializable,
@@ -59,33 +69,46 @@ contract ValidatorUpgradeable is Initializable,
 
     IERC20 public token; // usdt token.
 
-    ProxyRouterContractInterface internal proxyRouterContract;
-
-    address public proxyRouterContractAddress;
-
     uint256 public constant AMOUNT_OF_MONTHS_TO_UNLOCK = 6;
+
+    address public proxyRouterAddress;
+    ProxyRouterInterface private proxyRouterContract;
 
     mapping(address => Structs.Token) public tokens;
     mapping(address => mapping(address => Structs.LockedTokens))
         public userTokens;
+    mapping(address => Structs.EarnedAndToClaim) public userEarned;
+
+    address[] public tokensAddresses;
 
     // Events
-    event TokensLocked(
-        address indexed tokenAddress,
-        address indexed user,
-        uint256 amount,
-        uint256 timestamp
-    );
     event TokenAdded(address tokenAddress);
     event TokenUpdated(address tokenAddress, bool isPaused);
     event TokenDeleted(address tokenAddress);
-    event UpdateProxyRouterContractAddress(address proxyRouterContractAddress);
 
-    event Locked(address tokenAddress, address user, uint256 amount, uint256 timestamp);
-    event Unlocked(address tokenAddress, address user, uint256 amount, uint256 timestamp);
-    event Claimed(address tokenAddress, address user, uint256 amount, uint256 timestamp);
+    event UpdatProxyRouterContractAddress(address proxyRouterAddress);
+
+    event AddedNewTokenPayoutBond(address indexed tokenAddress, uint256 timestamp, uint256 percent);
+    event EditTokenPayoutBond(address indexed tokenAddress, uint256 timestamp, uint256 percent);
+    event DeletedTokenPayoutBond(address indexed tokenAddress, uint256 timestamp);
+
+    event Locked(
+        address indexed tokenAddress,
+        address indexed user,
+        uint256 amount
+    );
+    event Unlocked(
+        address indexed tokenAddress,
+        address indexed user,
+        uint256 amount
+    );
+    event Claimed(
+        address indexed user,
+        uint256 amount
+    );
 
     event Payout(address to, uint256 amount);
+    event PayoutERC20(address tokenAddress, address to, uint256 amount);
     event Credited(address from, uint256 amount);
 
     modifier isTokenPresent(address _tokenAddress, bool _bool) {
@@ -100,35 +123,16 @@ contract ValidatorUpgradeable is Initializable,
         _;
     }
 
-    modifier onlyProxyRouterAccount() {
-        require(
-            _msgSender() == proxyRouterContractAddress,
-            "Ownable: caller is not the proxyRouter"
-        );
-        _;
-    }
-
-    modifier onlyOwnerOrProxyRouterAccount() {
-        require(
-            _msgSender() == owner() ||
-                _msgSender() == proxyRouterContractAddress,
-            "Ownable: caller is not the proxyRouter"
-        );
-        _;
-    }
-
     /** @dev Initializes contract
      */
-    function initialize(IERC20 _token, address _proxyRouterContractAddress) public payable initializer {
+    function initialize(IERC20 _token, address _proxyRouterAddress) public payable initializer {
         token = _token;
-        proxyRouterContract = ProxyRouterContractInterface(
-            _proxyRouterContractAddress
-        );
-        proxyRouterContractAddress = _proxyRouterContractAddress;
+        proxyRouterAddress = _proxyRouterAddress;
+        proxyRouterContract = ProxyRouterInterface(_proxyRouterAddress);
         __Ownable_init();
         __ReentrancyGuard_init();
     }
-
+    
     ///@dev required by the OZ UUPS module
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
@@ -153,28 +157,28 @@ contract ValidatorUpgradeable is Initializable,
         isTokenActive(_tokenAddress)
         nonReentrant
     {
-        calculateEarnings(_tokenAddress, msg.sender);
-        recalculateMonths(_tokenAddress, msg.sender);
-        unlock(_tokenAddress, msg.sender, _amount);
+        _calculateEarnings(_tokenAddress, msg.sender);
+        _recalculateMonths(_tokenAddress, msg.sender);
+        _unlock(_tokenAddress, msg.sender, _amount);
         IERC20 _lockedToken = IERC20(_tokenAddress);
         _lockedToken.safeTransfer(msg.sender, _amount);
-        emit Unlocked(_tokenAddress, msg.sender, _amount, block.timestamp);
+        emit Unlocked(_tokenAddress, msg.sender, _amount);
     }
 
     /** @dev Claims earnings from locked token.
-     * @param _tokenAddress address of the contract.
      * @param _amount amount to claim.
      */
-    function claim(address _tokenAddress, uint256 _amount)
+    function claim(uint256 _amount)
         public
-        isTokenActive(_tokenAddress)
         nonReentrant
     {
-        calculateEarnings(_tokenAddress, msg.sender);
-        recalculateMonths(_tokenAddress, msg.sender);
-        userTokens[_tokenAddress][msg.sender].toClaim -= _amount;
+        for (uint256  i = 0; i < tokensAddresses.length; i++) {
+            _calculateEarnings(tokensAddresses[i], msg.sender);
+            _recalculateMonths(tokensAddresses[i], msg.sender);
+        }
+        userEarned[msg.sender].toClaim -= _amount;
         token.transfer(msg.sender, _amount);
-        emit Claimed(_tokenAddress, msg.sender, _amount, block.timestamp);
+        emit Claimed(msg.sender, _amount);
     }
 
     /** @dev Creates token. Called only by proxyrouter
@@ -183,11 +187,13 @@ contract ValidatorUpgradeable is Initializable,
     function createToken(address _tokenAddress)
         public
         isTokenPresent(_tokenAddress, false)
-        onlyProxyRouterAccount
+        onlyOwner
     {
         tokens[_tokenAddress].isPresent = true;
         tokens[_tokenAddress].isPaused = false;
         tokens[_tokenAddress].isLockedActive = true;
+
+        tokensAddresses.push(_tokenAddress);
 
         emit TokenAdded(_tokenAddress);
     }
@@ -199,7 +205,7 @@ contract ValidatorUpgradeable is Initializable,
     function updateTokenPaused(address _tokenAddress, bool _isPaused)
         public
         isTokenPresent(_tokenAddress, true)
-        onlyOwnerOrProxyRouterAccount
+        onlyOwner
     {
         tokens[_tokenAddress].isPaused = _isPaused;
         emit TokenUpdated(_tokenAddress, _isPaused);
@@ -211,86 +217,129 @@ contract ValidatorUpgradeable is Initializable,
     function deleteToken(address _tokenAddress)
         public
         isTokenPresent(_tokenAddress, true)
-        onlyProxyRouterAccount
+        onlyOwner
     {
         Structs.Token storage _token = tokens[_tokenAddress];
         require(
-            _token.wasSomethingLocked,
+            !_token.wasSomethingLocked,
             "Something was locked already. Cannot delete token"
         );
-        for (uint256 i = 0; i < _token.payoutBonds.length; i++) {
-            delete _token.usedDates[_token.payoutBonds[i].timestamp];
-            delete _token.passedDates[_token.payoutBonds[i].timestamp];
+        for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
+            delete tokens[_tokenAddress].timestampToPercent[ _token.usedTimestamps[i]];
+        }
+        for (uint256 i = 0; i < tokensAddresses.length; i++) {
+            if (tokensAddresses[i] == _tokenAddress) {
+                tokensAddresses[i] = tokensAddresses[tokensAddresses.length - 1];
+                tokensAddresses.pop();
+            }
         }
         delete tokens[_tokenAddress];
         emit TokenDeleted(_tokenAddress);
     }
 
-    /** @dev Updates referrals contractAddress
-     * @param _proxyRouterContractAddress address of new contract.
+    /** @dev Adds tokens payout bonds
+     * @param _tokenAddress address of the contract.
+     * @param _timestamp unix timestamp of the bond payment.
+     * @param _percent percent of the bond payment.
      */
-    function updateProxyRouterContractAddress(
-        address _proxyRouterContractAddress
-    ) public onlyOwner {
-        proxyRouterContract = ProxyRouterContractInterface(
-            _proxyRouterContractAddress
-        );
-        proxyRouterContractAddress = _proxyRouterContractAddress;
-        emit UpdateProxyRouterContractAddress(_proxyRouterContractAddress);
+    function addTokensPayoutBonds(
+        address _tokenAddress,
+        uint256 _timestamp,
+        uint256 _percent
+    ) public isTokenPresent(_tokenAddress, true) onlyOwner {
+        if (
+            _timestamp <= block.timestamp || 
+            _timestamp <= tokens[_tokenAddress].lastTimestamp ||
+            _percent == uint256(0) ||
+            _percent > uint256(10_000) ||
+            tokens[_tokenAddress].timestampToPercent[_timestamp] != uint256(0)
+            ) {
+            revert Errors.InvalidBondData();
+        }
+
+        tokens[_tokenAddress].timestampToPercent[_timestamp] = _percent;
+        tokens[_tokenAddress].usedTimestamps.push(_timestamp);
+        tokens[_tokenAddress].lastTimestamp = _timestamp;   
+
+        emit AddedNewTokenPayoutBond(_tokenAddress, _timestamp, _percent);
     }
 
     /** @dev Adds tokens payout bonds
      * @param _tokenAddress address of the contract.
-     * @param _data Structs.PayoutBonds[] objects array {timestamp, percentForPrevMonths}.
+     * @param _timestamp unix timestamp of the bond payment.
+     * @param _percent percent of the bond payment.
      */
-    function addTokensPayoutBonds(
+    function editTokensPayoutBonds(
         address _tokenAddress,
-        Structs.PayoutBonds[] memory _data
+        uint256 _timestamp,
+        uint256 _percent
     ) public isTokenPresent(_tokenAddress, true) onlyOwner {
+        if (
+            _timestamp <= block.timestamp || 
+            _percent == uint256(0) ||
+            _percent > uint256(10_000) ||
+            tokens[_tokenAddress].timestampToPercent[_timestamp] == uint256(0)
+            ) {
+            revert Errors.InvalidBondData();
+        }
+
+        tokens[_tokenAddress].timestampToPercent[_timestamp] = _percent;
+
+        emit EditTokenPayoutBond(_tokenAddress, _timestamp, _percent);
+    }
+
+    /** @dev Adds tokens payout bonds
+     * @param _tokenAddress address of the contract.
+     * @param _timestamp unix timestamp of the bond payment.
+     */
+    function deleteTokensPayoutBonds(
+        address _tokenAddress,
+        uint256 _timestamp
+    ) public isTokenPresent(_tokenAddress, true) onlyOwner {
+        if (
+            _timestamp <= block.timestamp || 
+            tokens[_tokenAddress].timestampToPercent[_timestamp] == uint256(0)
+            ) {
+            revert Errors.InvalidBondData();
+        }
+
         Structs.Token storage _token = tokens[_tokenAddress];
 
-        uint256 _prevTimestamp;
+        delete tokens[_tokenAddress].timestampToPercent[_timestamp];
 
-        for (uint256 i = 0; i < _token.payoutBonds.length; i++) {
-            if (_token.payoutBonds[i].timestamp < block.timestamp) {
-                tokens[_tokenAddress].passedDates[
-                    _token.payoutBonds[i].timestamp
-                ] = true;
-            } else {
+        for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
+            if (_token.usedTimestamps[i] == _timestamp) {
+                tokens[_tokenAddress].usedTimestamps[i] = _token
+                    .usedTimestamps[_token.usedTimestamps.length - 1];
+                tokens[_tokenAddress].usedTimestamps.pop();
                 break;
             }
         }
 
-        Structs.Token storage _tokenSecondary = tokens[_tokenAddress];
-
-        // array is unlimitted
-        // если дата присутствует то ее можно изменить только если ее таймштамп еще не прошел
-        for (uint256 i = 0; i < _data.length; i++) {
-            if (
-                _data[i].timestamp < _prevTimestamp ||
-                (_tokenSecondary.passedDates[_data[i].timestamp] && //Дата прошла true && percent != newPercent => err
-                    _tokenSecondary.usedDates[_data[i].timestamp].percent !=
-                    _data[i].percent)
-            ) {
-                revert Errors.InvalidBondData();
-            }
-            _prevTimestamp = _data[i].timestamp;
+        if (_token.usedTimestamps.length == 0) {
+            tokens[_tokenAddress].lastTimestamp = uint256(0);   
+        } else if (_timestamp == _token.lastTimestamp) {
+            tokens[_tokenAddress].lastTimestamp = _token.usedTimestamps[_token.usedTimestamps.length - 1];
         }
 
-        for (uint256 i = 0; i < _token.payoutBonds.length; i++) {
-            delete tokens[_tokenAddress].passedDates[
-                _token.payoutBonds[i].timestamp
-            ];
-            delete tokens[_tokenAddress].usedDates[
-                _token.payoutBonds[i].timestamp
-            ];
-        }
-
-        for (uint256 i = 0; i < _data.length; i++) {
-            tokens[_tokenAddress].usedDates[_data[i].timestamp] = Structs
-                .UsedDates(true, _data[i].percent);
-        }
+        emit DeletedTokenPayoutBond(_tokenAddress, _timestamp);
     }
+
+     /** @dev Updates referrals contractAddress
+     * @param _proxyRouterAddress address of new contract.
+     */
+    function updatProxyRouterContractAddress(address _proxyRouterAddress)
+        public
+        onlyOwner
+    {
+        proxyRouterContract = ProxyRouterInterface(
+            _proxyRouterAddress
+        );
+        proxyRouterAddress = _proxyRouterAddress;
+
+        emit UpdatProxyRouterContractAddress(_proxyRouterAddress);
+    }
+
 
     /** @dev withdraws value from contract.
      * @param _amount *
@@ -306,7 +355,20 @@ contract ValidatorUpgradeable is Initializable,
         emit Payout(msg.sender, _amount);
     }
 
-    function onTokenTransfer(
+    /** @dev withdraws value from contract.
+     * @param _tokenAddress *
+     * @param _amount *
+     */
+    function withdrawERC20(address _tokenAddress, uint256 _amount)
+        public
+        onlyOwner
+    {
+        IERC20 _token = IERC20(_tokenAddress);
+        _token.safeTransfer(msg.sender, _amount);
+        emit PayoutERC20(_tokenAddress, msg.sender, _amount);
+    }
+
+    function onTokenApproval(
         address _from,
         uint256 _amount,
         bytes calldata _extraData
@@ -322,12 +384,33 @@ contract ValidatorUpgradeable is Initializable,
         }
     }
 
+    function getOtherTokensLength(address _tokenAddress, address _user) public view returns (uint256) {
+        return userTokens[_tokenAddress][_user].otherTokens.length;
+    }
+
+    function getTokensUsedTimestampsLength(address _tokenAddress) public view returns (uint256) {
+        return tokens[_tokenAddress].usedTimestamps.length;
+    }
+
+    function getOtherTokensByIndex(address _tokenAddress, address _user, uint256 _index) public view returns (Structs.LockedTokensSecondary memory) {
+        return userTokens[_tokenAddress][_user].otherTokens[_index];
+    }
+
+    function getTokensUsedTimestampsByIndex(address _tokenAddress, uint256 _index) public view returns (uint256) {
+        return tokens[_tokenAddress].usedTimestamps[_index];
+    }
+
+    function getTokensTimestampToPercent(address _tokenAddress, uint256 _timestamp) public view returns (uint256) {
+        return tokens[_tokenAddress].timestampToPercent[_timestamp];
+    }
+
     function _lock(
         address _tokenAddress,
         address _from,
         uint256 _amount
     ) internal isTokenActive(_tokenAddress) {
-        recalculateMonths(_tokenAddress, _from);
+        _calculateEarnings(_tokenAddress, _from);
+        _recalculateMonths(_tokenAddress, _from);
         IERC20 _lockingToken = IERC20(_tokenAddress);
         _lockingToken.safeTransferFrom(_from, address(this), _amount);
 
@@ -335,19 +418,23 @@ contract ValidatorUpgradeable is Initializable,
             _from
         ];
         if (_userTokens.initLocked == uint256(0)) {
-            _userTokens.initLocked = _amount;
-            _userTokens.initTimeCreate = newDate(block.timestamp);
-            _userTokens.lastCalculationTimestamp = newDate(block.timestamp);
-        } else if (_userTokens.initTimeCreate == newDate(block.timestamp)) {
-            _userTokens.initLocked += _amount;
+            userTokens[_tokenAddress][_from].initLocked = _amount;
+            userTokens[_tokenAddress][_from].initTimeCreate = _newDate(
+                block.timestamp
+            );
+            userTokens[_tokenAddress][_from].lastCalculationTimestamp = _newDate(
+                block.timestamp
+            );
+        } else if (_userTokens.initTimeCreate == _newDate(block.timestamp)) {
+            userTokens[_tokenAddress][_from].initLocked += _amount;
         } else {
-            addOtherTokens(_tokenAddress, _from, _amount);
+            _addOtherTokens(_tokenAddress, _from, _amount);
         }
         tokens[_tokenAddress].wasSomethingLocked = true;
-        emit Locked(_tokenAddress, _from, _amount, block.timestamp);
+        emit Locked(_tokenAddress, _from, _amount);
     }
 
-    function addOtherTokens(
+    function _addOtherTokens(
         address _tokenAddress,
         address _user,
         uint256 _amount
@@ -357,39 +444,34 @@ contract ValidatorUpgradeable is Initializable,
         Structs.LockedTokens memory _userTokens = userTokens[_tokenAddress][
             _user
         ];
-        (
-            uint256 _todayYear,
-            uint256 _todayMonth,
 
-        ) = BokkyPooBahsDateTimeLibrary.timestampToDate(block.timestamp);
+        uint256 _newTimestamp = _newDate(block.timestamp);
 
         // array is limited to 6 elems
-        for (uint256 i = 0; i < _userTokens.otherTokens.length; i++) {
+        if (_userTokens.otherTokens.length != 0 && _newTimestamp == _userTokens.otherTokens[_userTokens.otherTokens.length - 1].timestamp) {
             // Today is September. Check if day < 15 then add to 01.10 else 01.11
-            (uint256 _year, uint256 _month, ) = BokkyPooBahsDateTimeLibrary
-                .timestampToDate(_userTokens.otherTokens[i].timestamp);
-            if (_todayYear == _year && _todayMonth == _month) {
-                userTokens[_tokenAddress][_user]
-                    .otherTokens[i]
-                    .amount += _amount;
-                return;
-            }
+            userTokens[_tokenAddress][_user]
+                .otherTokens[_userTokens.otherTokens.length - 1]
+                .amount += _amount;
+            return;
         }
 
-        uint256 _newTimestamp = newDate(block.timestamp);
         userTokens[_tokenAddress][_user].otherTokens.push(
             Structs.LockedTokensSecondary(_newTimestamp, _amount)
         );
     }
 
-    function calculateEarnings(address _tokenAddress, address _user) internal {
+    function _calculateEarnings(address _tokenAddress, address _user) internal {
         Structs.LockedTokens memory _userTokens;
         _userTokens = userTokens[_tokenAddress][_user];
         Structs.Token storage _token = tokens[_tokenAddress];
 
-        uint _deleted;
+        uint256 _deleted;
 
-        if (_userTokens.lastCalculationTimestamp < block.timestamp) {
+        // 01.2022 and block = 05.01.2022 false
+        // 01.2022 and block = 05.02.2022 true => 02.2022 and block = 05.02.2022 false
+
+        if (_userTokens.lastCalculationTimestamp >= block.timestamp || _userTokens.initTimeCreate == uint256(0)) {
             return;
         }
 
@@ -402,14 +484,16 @@ contract ValidatorUpgradeable is Initializable,
             block.timestamp
         );
         uint256 _earnings;
-        if (_monthsInit > AMOUNT_OF_MONTHS_TO_UNLOCK && _months != 0) {
-            for (uint256 i = 0; i < _token.payoutBonds.length; i++) {
+
+        if (_monthsInit >= AMOUNT_OF_MONTHS_TO_UNLOCK && _months != 0) {
+            for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
                 if (
-                    _token.payoutBonds[i].timestamp >
-                    _userTokens.lastCalculationTimestamp
+                    _userTokens.initTimeCreate < _token.usedTimestamps[i] &&
+                    _userTokens.lastCalculationTimestamp < _token.usedTimestamps[i] &&
+                    _token.usedTimestamps[i] < block.timestamp
                 ) {
                     uint256 _initEarnings = (_userTokens.initLocked *
-                        _token.payoutBonds[i].percent) / 10_000;
+                        _token.timestampToPercent[_token.usedTimestamps[i]]) / 10_000;
                     _earnings += _initEarnings;
 
                     for (
@@ -432,8 +516,12 @@ contract ValidatorUpgradeable is Initializable,
                         uint256 _othetTokensEarnings = (_userTokens
                             .otherTokens[ii]
                             .amount *
-                            _monthsOtherTokensDiff *
-                            _token.payoutBonds[i].percent) /
+                            (
+                                _monthsOtherTokensDiff <= AMOUNT_OF_MONTHS_TO_UNLOCK 
+                                ? _monthsOtherTokensDiff 
+                                : AMOUNT_OF_MONTHS_TO_UNLOCK
+                                ) *
+                             _token.timestampToPercent[_token.usedTimestamps[i]]) /
                             (10_000 * AMOUNT_OF_MONTHS_TO_UNLOCK);
                         _earnings += (
                             _othetTokensEarnings <= _initEarnings
@@ -444,17 +532,18 @@ contract ValidatorUpgradeable is Initializable,
                             _monthsOtherTokensDiff >= AMOUNT_OF_MONTHS_TO_UNLOCK
                         ) {
                             // reset months
-                            userTokens[_tokenAddress][_user].otherTokens[
-                                    i
-                                ] = _userTokens.otherTokens[
-                                _userTokens.otherTokens.length - 1 - _deleted
-                            ];
-                            userTokens[_tokenAddress][_user].otherTokens.pop();
+                            _deleteFromUserTokens(_tokenAddress, _user, ii - _deleted);
+                            // userTokens[_tokenAddress][_user].otherTokens[
+                            //         ii - _deleted
+                            //     ] = _userTokens.otherTokens[
+                            //     _userTokens.otherTokens.length - 1 - _deleted
+                            // ];
+                            // userTokens[_tokenAddress][_user].otherTokens.pop();
 
                             // update initLocked
                             userTokens[_tokenAddress][_user]
                                 .initLocked += _userTokens
-                                .otherTokens[ii]
+                                .otherTokens[ii - _deleted]
                                 .amount;
 
                             _userTokens.initLocked += _userTokens
@@ -466,15 +555,12 @@ contract ValidatorUpgradeable is Initializable,
                     }
                 }
             }
-
-            uint256 newTimestampWithMonths = BokkyPooBahsDateTimeLibrary
-                .addMonths(block.timestamp, 1);
             (
                 uint256 _todayYearWithMonths,
                 uint256 _todayMonthWithMonths,
 
             ) = BokkyPooBahsDateTimeLibrary.timestampToDate(
-                    newTimestampWithMonths
+                    block.timestamp
                 );
             uint256 _newTimestamp = BokkyPooBahsDateTimeLibrary
                 .timestampFromDate(
@@ -485,15 +571,16 @@ contract ValidatorUpgradeable is Initializable,
 
             userTokens[_tokenAddress][_user]
                 .lastCalculationTimestamp = _newTimestamp;
-            userTokens[_tokenAddress][_user].earned += _earnings;
-            userTokens[_tokenAddress][_user].toClaim += _earnings;
+            
+            userEarned[_user].earned += _earnings * proxyRouterContract.tokens(_tokenAddress).price;
+            userEarned[_user].toClaim += _earnings * proxyRouterContract.tokens(_tokenAddress).price;
         }
     }
 
-    function recalculateMonths(address _tokenAddress, address _user) internal {
+    function _recalculateMonths(address _tokenAddress, address _user) internal {
         // push other tokens to init if month > 6
 
-        uint _deleted;
+        uint256 _deleted;
 
         Structs.LockedTokens memory _userTokens = userTokens[_tokenAddress][
             _user
@@ -509,36 +596,62 @@ contract ValidatorUpgradeable is Initializable,
                 block.timestamp
             );
             if (_months >= AMOUNT_OF_MONTHS_TO_UNLOCK) {
-                userTokens[_tokenAddress][_user].otherTokens[i] = _userTokens
-                    .otherTokens[_userTokens.otherTokens.length - 1 - _deleted];
-                userTokens[_tokenAddress][_user].otherTokens.pop();
+                _deleteFromUserTokens(_tokenAddress, _user, i - _deleted);
+                // for(uint ii = i - _deleted; i - _deleted < _userTokens.otherTokens.length - 1; i++){
+                //     userTokens[_tokenAddress][_user].otherTokens[ii] = userTokens[_tokenAddress][_user].otherTokens[ii + 1];      
+                // }
+                // userTokens[_tokenAddress][_user].otherTokens.pop();
+                userTokens[_tokenAddress][_user]
+                    .initLocked += _userTokens
+                    .otherTokens[i]
+                    .amount;
+
                 _deleted++;
             }
         }
     }
 
-    function unlock(address _tokenAddress, address _user, uint256 _amount) internal {
+    function _unlock(
+        address _tokenAddress,
+        address _user,
+        uint256 _amount
+    ) internal {
         Structs.LockedTokens memory _userTokens = userTokens[_tokenAddress][
             _user
         ];
 
-        uint _deleted;
-
-        // array is limited to 6 elems
-        for (uint256 i = _userTokens.otherTokens.length; i > 0; i--) {
-            (bool _success, ) = SafeMathUpgradeable.trySub(_userTokens.otherTokens[i - 1].amount, _amount);
-            if (_success) {
-                userTokens[_tokenAddress][_user].otherTokens[i - 1].amount -= _amount;
-                return;
-            }
-            userTokens[_tokenAddress][_user].otherTokens[i - 1] = _userTokens
-                    .otherTokens[_userTokens.otherTokens.length - 1 - _deleted];
-            userTokens[_tokenAddress][_user].otherTokens.pop();
-            _amount -= _userTokens.otherTokens[i - 1].amount;
-            _deleted++;
-        }
+        uint256 _deleted;
         
-        (bool __success, uint256 _newAmount) = SafeMathUpgradeable.trySub(_userTokens.initLocked, _amount);
+        if (_userTokens.otherTokens.length > 0) {
+            // array is limited to 6 elems
+            for (uint256 i = _userTokens.otherTokens.length; i > 0; i--) {
+                (bool _success, uint256 __newAmount) = SafeMathUpgradeable.trySub(
+                    _userTokens.otherTokens[i - 1].amount,
+                    _amount
+                );
+                if (_success && __newAmount != uint256(0)) {
+                    userTokens[_tokenAddress][_user]
+                        .otherTokens[i - 1]
+                        .amount -= _amount;
+                    return;
+                } else if (_success && __newAmount == uint256(0)) {
+                    _deleteFromUserTokens(_tokenAddress, _user, i - _deleted);
+                    return;
+                }
+                _deleteFromUserTokens(_tokenAddress, _user, i - _deleted);
+                // for(uint ii = i; i - _deleted < _userTokens.otherTokens.length-1; i++){
+                //     userTokens[_tokenAddress][_user].otherTokens[ii] = userTokens[_tokenAddress][_user].otherTokens[ii+1];      
+                // }
+                // userTokens[_tokenAddress][_user].otherTokens.pop();
+                _amount -= _userTokens.otherTokens[i - 1].amount;
+                _deleted++;
+            }
+        }
+
+        (bool __success, uint256 _newAmount) = SafeMathUpgradeable.trySub(
+            _userTokens.initLocked,
+            _amount
+        );
         require(__success, "Amount is too big");
 
         userTokens[_tokenAddress][_user].initLocked = _newAmount;
@@ -550,7 +663,7 @@ contract ValidatorUpgradeable is Initializable,
         return;
     }
 
-    function newDate(uint256 _timestamp) internal pure returns (uint256) {
+    function _newDate(uint256 _timestamp) internal pure returns (uint256) {
         (, , uint256 _todayDay) = BokkyPooBahsDateTimeLibrary.timestampToDate(
             _timestamp
         );
@@ -587,6 +700,13 @@ contract ValidatorUpgradeable is Initializable,
             );
         }
         return _newTimestamp;
+    }
+
+    function _deleteFromUserTokens(address _tokenAddress, address _user, uint256 _index) internal {
+        for(uint i = _index; i < userTokens[_tokenAddress][_user].otherTokens.length - 1; i++){
+            userTokens[_tokenAddress][_user].otherTokens[i] = userTokens[_tokenAddress][_user].otherTokens[i + 1];      
+        }
+        userTokens[_tokenAddress][_user].otherTokens.pop();
     }
 
     receive() external payable {
