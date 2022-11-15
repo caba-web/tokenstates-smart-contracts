@@ -9,14 +9,6 @@ import "./utils/datetime/BokkyPooBahsDateTimeLibrary.sol";
 import "hardhat/console.sol";
 
 library Structs {
-    struct PayoutBonds {
-        uint256 timestamp;
-        uint256 percent;
-    }
-    struct UsedDates {
-        bool isPresent;
-        uint256 percent;
-    }
     struct Token { 
         mapping(uint256 => uint256) timestampToPercent;
         uint256[] usedTimestamps;
@@ -42,6 +34,26 @@ library Structs {
     }
 }
 
+interface ProxyRouterInterface {
+    struct Token {
+        uint256 price; // price for the token. Used for buy bond, return bond, return bond after bad collecting
+        uint256 claimTimestamp; // timestamp when the bond will be available for return, is changable if more lastCallTimestamp
+        uint256 limitTimestamp; // timestamp when the bond will be not available for return anymore
+        uint256 available; // shows how much tokens are left for sale
+        uint256 sold; // shows how many tokens have been sold
+        uint256 lastCallTimestamp; // timestamp when project must sell all the tokens
+        uint256 createdTimestamp; // shows if project is real
+        uint256 closedTimestamp; // timestamp whe project is closed either by admin or automaticly
+        bool isActive; // shows if project is active, can be false if project did not collect all the money by set time
+        bool isPaused; // shows if token selling is still active
+        bool isCollected; // shows if project has collected all money, can be set by admin. Allowed to sell even after true
+    }
+    function tokens(address _tokenAddress)
+        external
+        view
+        returns (Token memory);
+}
+
 library Errors {
     error InvalidBondData();
     error UnknownFunctionId();
@@ -55,33 +67,39 @@ contract Validator is Ownable, ReentrancyGuard {
 
     uint256 public constant AMOUNT_OF_MONTHS_TO_UNLOCK = 6;
 
+    address public proxyRouterAddress;
+    ProxyRouterInterface private proxyRouterContract;
+
     mapping(address => Structs.Token) public tokens;
     mapping(address => mapping(address => Structs.LockedTokens))
         public userTokens;
     mapping(address => Structs.EarnedAndToClaim) public userEarned;
+
+    address[] public tokensAddresses;
 
     // Events
     event TokenAdded(address tokenAddress);
     event TokenUpdated(address tokenAddress, bool isPaused);
     event TokenDeleted(address tokenAddress);
 
+    event UpdatProxyRouterContractAddress(address proxyRouterAddress);
+
     event AddedNewTokenPayoutBond(address indexed tokenAddress, uint256 timestamp, uint256 percent);
     event EditTokenPayoutBond(address indexed tokenAddress, uint256 timestamp, uint256 percent);
     event DeletedTokenPayoutBond(address indexed tokenAddress, uint256 timestamp);
 
     event Locked(
-        address tokenAddress,
-        address user,
+        address indexed tokenAddress,
+        address indexed user,
         uint256 amount
     );
     event Unlocked(
-        address tokenAddress,
-        address user,
+        address indexed tokenAddress,
+        address indexed user,
         uint256 amount
     );
     event Claimed(
-        address tokenAddress,
-        address user,
+        address indexed user,
         uint256 amount
     );
 
@@ -103,8 +121,10 @@ contract Validator is Ownable, ReentrancyGuard {
 
     /** @dev Initializes contract
      */
-    constructor(IERC20 _token) {
+    constructor(IERC20 _token, address _proxyRouterAddress) {
         token = _token;
+        proxyRouterAddress = _proxyRouterAddress;
+        proxyRouterContract = ProxyRouterInterface(_proxyRouterAddress);
     }
 
     /** @dev Locks tokens. Receives earnings
@@ -137,19 +157,19 @@ contract Validator is Ownable, ReentrancyGuard {
     }
 
     /** @dev Claims earnings from locked token.
-     * @param _tokenAddress address of the contract.
      * @param _amount amount to claim.
      */
-    function claim(address _tokenAddress, uint256 _amount)
+    function claim(uint256 _amount)
         public
-        isTokenActive(_tokenAddress)
         nonReentrant
     {
-        _calculateEarnings(_tokenAddress, msg.sender);
-        _recalculateMonths(_tokenAddress, msg.sender);
+        for (uint256  i = 0; i < tokensAddresses.length; i++) {
+            _calculateEarnings(tokensAddresses[i], msg.sender);
+            _recalculateMonths(tokensAddresses[i], msg.sender);
+        }
         userEarned[msg.sender].toClaim -= _amount;
         token.transfer(msg.sender, _amount);
-        emit Claimed(_tokenAddress, msg.sender, _amount);
+        emit Claimed(msg.sender, _amount);
     }
 
     /** @dev Creates token. Called only by proxyrouter
@@ -163,6 +183,8 @@ contract Validator is Ownable, ReentrancyGuard {
         tokens[_tokenAddress].isPresent = true;
         tokens[_tokenAddress].isPaused = false;
         tokens[_tokenAddress].isLockedActive = true;
+
+        tokensAddresses.push(_tokenAddress);
 
         emit TokenAdded(_tokenAddress);
     }
@@ -195,6 +217,12 @@ contract Validator is Ownable, ReentrancyGuard {
         );
         for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
             delete tokens[_tokenAddress].timestampToPercent[ _token.usedTimestamps[i]];
+        }
+        for (uint256 i = 0; i < tokensAddresses.length; i++) {
+            if (tokensAddresses[i] == _tokenAddress) {
+                tokensAddresses[i] = tokensAddresses[tokensAddresses.length - 1];
+                tokensAddresses.pop();
+            }
         }
         delete tokens[_tokenAddress];
         emit TokenDeleted(_tokenAddress);
@@ -288,6 +316,21 @@ contract Validator is Ownable, ReentrancyGuard {
         emit DeletedTokenPayoutBond(_tokenAddress, _timestamp);
     }
 
+     /** @dev Updates referrals contractAddress
+     * @param _proxyRouterAddress address of new contract.
+     */
+    function updatProxyRouterContractAddress(address _proxyRouterAddress)
+        public
+        onlyOwner
+    {
+        proxyRouterContract = ProxyRouterInterface(
+            _proxyRouterAddress
+        );
+        proxyRouterAddress = _proxyRouterAddress;
+
+        emit UpdatProxyRouterContractAddress(_proxyRouterAddress);
+    }
+
 
     /** @dev withdraws value from contract.
      * @param _amount *
@@ -316,7 +359,7 @@ contract Validator is Ownable, ReentrancyGuard {
         emit PayoutERC20(_tokenAddress, msg.sender, _amount);
     }
 
-    function onTokenTransfer(
+    function onTokenApproval(
         address _from,
         uint256 _amount,
         bytes calldata _extraData
@@ -392,26 +435,18 @@ contract Validator is Ownable, ReentrancyGuard {
         Structs.LockedTokens memory _userTokens = userTokens[_tokenAddress][
             _user
         ];
-        (
-            uint256 _todayYear,
-            uint256 _todayMonth,
-
-        ) = BokkyPooBahsDateTimeLibrary.timestampToDate(block.timestamp);
-
-        // array is limited to 6 elems
-        for (uint256 i = 0; i < _userTokens.otherTokens.length; i++) {
-            // Today is September. Check if day < 15 then add to 01.10 else 01.11
-            (uint256 _year, uint256 _month, ) = BokkyPooBahsDateTimeLibrary
-                .timestampToDate(_userTokens.otherTokens[i].timestamp);
-            if (_todayYear == _year && _todayMonth == _month) {
-                userTokens[_tokenAddress][_user]
-                    .otherTokens[i]
-                    .amount += _amount;
-                return;
-            }
-        }
 
         uint256 _newTimestamp = _newDate(block.timestamp);
+
+        // array is limited to 6 elems
+        if (_userTokens.otherTokens.length != 0 && _newTimestamp == _userTokens.otherTokens[_userTokens.otherTokens.length - 1].timestamp) {
+            // Today is September. Check if day < 15 then add to 01.10 else 01.11
+            userTokens[_tokenAddress][_user]
+                .otherTokens[_userTokens.otherTokens.length - 1]
+                .amount += _amount;
+            return;
+        }
+
         userTokens[_tokenAddress][_user].otherTokens.push(
             Structs.LockedTokensSecondary(_newTimestamp, _amount)
         );
@@ -424,7 +459,10 @@ contract Validator is Ownable, ReentrancyGuard {
 
         uint256 _deleted;
 
-        if (_userTokens.lastCalculationTimestamp < block.timestamp) {
+        // 01.2022 and block = 05.01.2022 false
+        // 01.2022 and block = 05.02.2022 true => 02.2022 and block = 05.02.2022 false
+
+        if (_userTokens.lastCalculationTimestamp >= block.timestamp || _userTokens.initTimeCreate == uint256(0)) {
             return;
         }
 
@@ -437,11 +475,13 @@ contract Validator is Ownable, ReentrancyGuard {
             block.timestamp
         );
         uint256 _earnings;
-        if (_monthsInit > AMOUNT_OF_MONTHS_TO_UNLOCK && _months != 0) {
+
+        if (_monthsInit >= AMOUNT_OF_MONTHS_TO_UNLOCK && _months != 0) {
             for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
                 if (
                     _userTokens.initTimeCreate < _token.usedTimestamps[i] &&
-                    _userTokens.lastCalculationTimestamp < _token.usedTimestamps[i]
+                    _userTokens.lastCalculationTimestamp < _token.usedTimestamps[i] &&
+                    _token.usedTimestamps[i] < block.timestamp
                 ) {
                     uint256 _initEarnings = (_userTokens.initLocked *
                         _token.timestampToPercent[_token.usedTimestamps[i]]) / 10_000;
@@ -449,25 +489,29 @@ contract Validator is Ownable, ReentrancyGuard {
 
                     for (
                         uint256 ii = 0;
-                        ii < _userTokens.otherTokens.length + _deleted;
+                        ii < _userTokens.otherTokens.length;
                         ii++
                     ) {
                         if (
-                            _userTokens.otherTokens[ii - _deleted].timestamp >
+                            _userTokens.otherTokens[ii].timestamp >
                             block.timestamp
                         ) {
                             break;
                         }
                         uint256 _monthsOtherTokensDiff = BokkyPooBahsDateTimeLibrary
                                 .diffMonths(
-                                    _userTokens.otherTokens[ii - _deleted].timestamp,
+                                    _userTokens.otherTokens[ii].timestamp,
                                     block.timestamp
                                 );
 
                         uint256 _othetTokensEarnings = (_userTokens
-                            .otherTokens[ii - _deleted]
+                            .otherTokens[ii]
                             .amount *
-                            _monthsOtherTokensDiff *
+                            (
+                                _monthsOtherTokensDiff <= AMOUNT_OF_MONTHS_TO_UNLOCK 
+                                ? _monthsOtherTokensDiff 
+                                : AMOUNT_OF_MONTHS_TO_UNLOCK
+                                ) *
                              _token.timestampToPercent[_token.usedTimestamps[i]]) /
                             (10_000 * AMOUNT_OF_MONTHS_TO_UNLOCK);
                         _earnings += (
@@ -479,12 +523,13 @@ contract Validator is Ownable, ReentrancyGuard {
                             _monthsOtherTokensDiff >= AMOUNT_OF_MONTHS_TO_UNLOCK
                         ) {
                             // reset months
-                            userTokens[_tokenAddress][_user].otherTokens[
-                                    ii - _deleted
-                                ] = _userTokens.otherTokens[
-                                _userTokens.otherTokens.length - 1 - _deleted
-                            ];
-                            userTokens[_tokenAddress][_user].otherTokens.pop();
+                            _deleteFromUserTokens(_tokenAddress, _user, ii - _deleted);
+                            // userTokens[_tokenAddress][_user].otherTokens[
+                            //         ii - _deleted
+                            //     ] = _userTokens.otherTokens[
+                            //     _userTokens.otherTokens.length - 1 - _deleted
+                            // ];
+                            // userTokens[_tokenAddress][_user].otherTokens.pop();
 
                             // update initLocked
                             userTokens[_tokenAddress][_user]
@@ -493,7 +538,7 @@ contract Validator is Ownable, ReentrancyGuard {
                                 .amount;
 
                             _userTokens.initLocked += _userTokens
-                                .otherTokens[ii - _deleted]
+                                .otherTokens[ii]
                                 .amount;
 
                             _deleted++;
@@ -501,15 +546,12 @@ contract Validator is Ownable, ReentrancyGuard {
                     }
                 }
             }
-
-            uint256 newTimestampWithMonths = BokkyPooBahsDateTimeLibrary
-                .addMonths(block.timestamp, 1);
             (
                 uint256 _todayYearWithMonths,
                 uint256 _todayMonthWithMonths,
 
             ) = BokkyPooBahsDateTimeLibrary.timestampToDate(
-                    newTimestampWithMonths
+                    block.timestamp
                 );
             uint256 _newTimestamp = BokkyPooBahsDateTimeLibrary
                 .timestampFromDate(
@@ -520,8 +562,9 @@ contract Validator is Ownable, ReentrancyGuard {
 
             userTokens[_tokenAddress][_user]
                 .lastCalculationTimestamp = _newTimestamp;
-            userEarned[_user].earned += _earnings;
-            userEarned[_user].toClaim += _earnings;
+            
+            userEarned[_user].earned += _earnings * proxyRouterContract.tokens(_tokenAddress).price;
+            userEarned[_user].toClaim += _earnings * proxyRouterContract.tokens(_tokenAddress).price;
         }
     }
 
@@ -535,18 +578,25 @@ contract Validator is Ownable, ReentrancyGuard {
         ];
 
         // array is limited to 6 elems
-        for (uint256 i = 0; i < _userTokens.otherTokens.length + _deleted; i++) {
-            if (_userTokens.otherTokens[i - _deleted].timestamp > block.timestamp) {
+        for (uint256 i = 0; i < _userTokens.otherTokens.length; i++) {
+            if (_userTokens.otherTokens[i].timestamp > block.timestamp) {
                 break;
             }
             uint256 _months = BokkyPooBahsDateTimeLibrary.diffMonths(
-                _userTokens.otherTokens[i - _deleted].timestamp,
+                _userTokens.otherTokens[i].timestamp,
                 block.timestamp
             );
             if (_months >= AMOUNT_OF_MONTHS_TO_UNLOCK) {
-                userTokens[_tokenAddress][_user].otherTokens[i] = _userTokens
-                    .otherTokens[_userTokens.otherTokens.length - 1 - _deleted];
-                userTokens[_tokenAddress][_user].otherTokens.pop();
+                _deleteFromUserTokens(_tokenAddress, _user, i - _deleted);
+                // for(uint ii = i - _deleted; i - _deleted < _userTokens.otherTokens.length - 1; i++){
+                //     userTokens[_tokenAddress][_user].otherTokens[ii] = userTokens[_tokenAddress][_user].otherTokens[ii + 1];      
+                // }
+                // userTokens[_tokenAddress][_user].otherTokens.pop();
+                userTokens[_tokenAddress][_user]
+                    .initLocked += _userTokens
+                    .otherTokens[i]
+                    .amount;
+
                 _deleted++;
             }
         }
@@ -562,24 +612,31 @@ contract Validator is Ownable, ReentrancyGuard {
         ];
 
         uint256 _deleted;
-
-        // array is limited to 6 elems
-        for (uint256 i = _userTokens.otherTokens.length; i > 0 + _deleted; i--) {
-            (bool _success, ) = SafeMath.trySub(
-                _userTokens.otherTokens[i - 1 - _deleted].amount,
-                _amount
-            );
-            if (_success) {
-                userTokens[_tokenAddress][_user]
-                    .otherTokens[i - 1 - _deleted]
-                    .amount -= _amount;
-                return;
+        
+        if (_userTokens.otherTokens.length > 0) {
+            // array is limited to 6 elems
+            for (uint256 i = _userTokens.otherTokens.length; i > 0; i--) {
+                (bool _success, uint256 __newAmount) = SafeMath.trySub(
+                    _userTokens.otherTokens[i - 1].amount,
+                    _amount
+                );
+                if (_success && __newAmount != uint256(0)) {
+                    userTokens[_tokenAddress][_user]
+                        .otherTokens[i - 1]
+                        .amount -= _amount;
+                    return;
+                } else if (_success && __newAmount == uint256(0)) {
+                    _deleteFromUserTokens(_tokenAddress, _user, i - _deleted);
+                    return;
+                }
+                _deleteFromUserTokens(_tokenAddress, _user, i - _deleted);
+                // for(uint ii = i; i - _deleted < _userTokens.otherTokens.length-1; i++){
+                //     userTokens[_tokenAddress][_user].otherTokens[ii] = userTokens[_tokenAddress][_user].otherTokens[ii+1];      
+                // }
+                // userTokens[_tokenAddress][_user].otherTokens.pop();
+                _amount -= _userTokens.otherTokens[i - 1].amount;
+                _deleted++;
             }
-            userTokens[_tokenAddress][_user].otherTokens[i - 1 - _deleted] = _userTokens
-                .otherTokens[_userTokens.otherTokens.length - 1 - _deleted];
-            userTokens[_tokenAddress][_user].otherTokens.pop();
-            _amount -= _userTokens.otherTokens[i - 1 - _deleted].amount;
-            _deleted++;
         }
 
         (bool __success, uint256 _newAmount) = SafeMath.trySub(
@@ -634,6 +691,15 @@ contract Validator is Ownable, ReentrancyGuard {
             );
         }
         return _newTimestamp;
+    }
+
+    function _deleteFromUserTokens(address _tokenAddress, address _user, uint256 _index) internal {
+        // console.log("length", userTokens[_tokenAddress][_user].otherTokens.length);
+        // console.log("timestamp",  userTokens[_tokenAddress][_user].otherTokens[_index].timestamp);
+        for(uint i = _index; i < userTokens[_tokenAddress][_user].otherTokens.length - 1; i++){
+            userTokens[_tokenAddress][_user].otherTokens[i] = userTokens[_tokenAddress][_user].otherTokens[i + 1];      
+        }
+        userTokens[_tokenAddress][_user].otherTokens.pop();
     }
 
     receive() external payable {
