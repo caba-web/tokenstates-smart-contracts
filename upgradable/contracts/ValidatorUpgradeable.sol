@@ -81,6 +81,8 @@ contract ValidatorUpgradeable is Initializable,
 
     address[] public tokensAddresses;
 
+    uint256 public constant MINIMAL_AMOUNT = 1 * 10 ** 18;
+
     // Events
     event TokenAdded(address tokenAddress);
     event TokenUpdated(address tokenAddress, bool isPaused);
@@ -145,6 +147,7 @@ contract ValidatorUpgradeable is Initializable,
         isTokenActive(_tokenAddress)
         nonReentrant
     {
+        require(_amount >= MINIMAL_AMOUNT);
         _lock(_tokenAddress, msg.sender, _amount);
     }
 
@@ -157,6 +160,7 @@ contract ValidatorUpgradeable is Initializable,
         isTokenActive(_tokenAddress)
         nonReentrant
     {
+        require(_amount >= MINIMAL_AMOUNT);
         _calculateEarnings(_tokenAddress, msg.sender);
         _recalculateMonths(_tokenAddress, msg.sender);
         _unlock(_tokenAddress, msg.sender, _amount);
@@ -179,6 +183,27 @@ contract ValidatorUpgradeable is Initializable,
         userEarned[msg.sender].toClaim -= _amount;
         token.transfer(msg.sender, _amount);
         emit Claimed(msg.sender, _amount);
+    }
+    
+    /** @dev Adds toClaim and earned. Only for test usage
+     * @param _user address of the user.
+     * @param _amount amount needed to be add.
+     */
+    function addClaimValue(
+        address _user,
+        uint256 _amount
+    ) public onlyOwner {
+        userEarned[_user].toClaim += _amount;
+        userEarned[_user].earned += _amount;
+    }
+
+    /** @dev Changes USDT token. Only for test usage
+     * @param _token usdt token address.
+     */
+    function updateUSDTToken(
+        IERC20 _token
+    ) public onlyOwner {
+        token = _token;
     }
 
     /** @dev Creates token. Called only by proxyrouter

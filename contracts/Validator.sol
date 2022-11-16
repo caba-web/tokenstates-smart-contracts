@@ -65,6 +65,7 @@ contract Validator is Ownable, ReentrancyGuard {
     IERC20 public immutable token; // usdt token.
 
     uint256 public constant AMOUNT_OF_MONTHS_TO_UNLOCK = 6;
+    uint256 public constant MINIMAL_AMOUNT = 1 * 10 ** 18;
 
     address public proxyRouterAddress;
     ProxyRouterInterface private proxyRouterContract;
@@ -134,7 +135,8 @@ contract Validator is Ownable, ReentrancyGuard {
         public
         isTokenActive(_tokenAddress)
         nonReentrant
-    {
+    {   
+        require(_amount >= MINIMAL_AMOUNT);
         _lock(_tokenAddress, msg.sender, _amount);
     }
 
@@ -147,6 +149,7 @@ contract Validator is Ownable, ReentrancyGuard {
         isTokenActive(_tokenAddress)
         nonReentrant
     {
+        require(_amount >= MINIMAL_AMOUNT);
         _calculateEarnings(_tokenAddress, msg.sender);
         _recalculateMonths(_tokenAddress, msg.sender);
         _unlock(_tokenAddress, msg.sender, _amount);

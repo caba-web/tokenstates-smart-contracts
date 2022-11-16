@@ -13,7 +13,7 @@ async function main(proxyRouterAddress = "0x000000000000000000000000000000000000
 
 	if (networkName === "bscTestnet") {
         args = [
-            "0x337610d27c682E347C9cD60BD4b3b107C9d34dDd",
+            "0xB425dA01b4A353fF9f36f6Cae4acD32911046fE5",
             proxyRouterAddress, //paste your value
         ];
     } else if (networkName === "bsc") {
@@ -33,12 +33,12 @@ async function main(proxyRouterAddress = "0x000000000000000000000000000000000000
     // const validator = await Validator.deploy(...args);
 
     // Deploying mutable
-    const Validator = await hre.ethers.getContractFactory("ValidatorUpgradeable");
-    const validator = await upgrades.deployProxy(Validator, args, {kind: "uups"});
+    // const Validator = await hre.ethers.getContractFactory("ValidatorUpgradeable");
+    // const validator = await upgrades.deployProxy(Validator, args, {kind: "uups"});
 
     // Upgrading
-    // const Validator = await ethers.getContractFactory("ValidatorUpgradeable");
-    // const validator = await upgrades.upgradeProxy("0x97eb8b6aB86AbE13347de0EaFFcBd62fD8b87D25", Validator);
+    const Validator = await ethers.getContractFactory("ValidatorUpgradeable");
+    const validator = await upgrades.upgradeProxy("0x7c70c6740c2715a03c329b0503bc935d424d3166", Validator);
 
 
 	await validator.deployed();
