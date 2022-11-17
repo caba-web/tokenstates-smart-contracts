@@ -706,6 +706,7 @@ describe("Validator", function () {
         let monthPlusEight = moment().utc(true).add(8, 'month').startOf('month').unix();
         let monthPlusNine = moment().utc(true).add(9, 'month').startOf('month').unix();
         let monthPlusTen = moment().utc(true).add(10, 'month').startOf('month').unix();
+        let monthPlusFivteen = moment().utc(true).add(15, 'month').startOf('month').unix();
 
         await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEight, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEight, 350);
         await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusTen, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusTen, 350);
@@ -811,6 +812,497 @@ describe("Validator", function () {
         expect((await validator.userTokens(tsCoin.address, user1.address)).lastCalculationTimestamp).to.equal(monthPlusTen); 
         expect((await validator.userEarned(user1.address)).earned).to.equal(BigNumber.from("297499999999999999800"))
         expect((await validator.userEarned(user1.address)).toClaim).to.equal(BigNumber.from("297499999999999999800"))
+
+    })
+
+    it("should lock tokens and check double claim", async function () {
+        let monthPlusOne = moment().utc(true).add(1, 'month').startOf('month').unix();
+        let monthPlusTwo = moment().utc(true).add(2, 'month').startOf('month').unix();
+        let monthPlusThree = moment().utc(true).add(3, 'month').startOf('month').unix();
+        let monthPlusFour = moment().utc(true).add(4, 'month').startOf('month').unix();
+        let monthPlusFive = moment().utc(true).add(5, 'month').startOf('month').unix();
+        let monthPlusSix = moment().utc(true).add(6, 'month').startOf('month').unix();
+        let monthPlusSeven = moment().utc(true).add(7, 'month').startOf('month').unix();
+        let monthPlusEight = moment().utc(true).add(8, 'month').startOf('month').unix();
+        let monthPlusNine = moment().utc(true).add(9, 'month').startOf('month').unix();
+        let monthPlusTen = moment().utc(true).add(10, 'month').startOf('month').unix();
+        let monthPlusFivteen = moment().utc(true).add(15, 'month').startOf('month').unix();
+
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEight, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEight, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusTen, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusTen, 350);
+
+        await expect(testUsdt.connect(user1).approve(proxyRouter.address, ethers.utils.parseEther("6000")))
+            .to.emit(testUsdt, "Approval").withArgs(user1.address, proxyRouter.address, ethers.utils.parseEther("6000"));
+
+        await expect(proxyRouter.connect(user1).buy(tsCoin.address, ethers.utils.parseEther("6000")))
+            .to.emit(proxyRouter, "Buy").withArgs(tsCoin.address, user1.address, true, ethers.utils.parseEther("6000"), ethers.utils.parseEther("120"), 50)
+            .to.emit(tsCoin, "Transfer").withArgs(proxyRouter.address, user1.address, ethers.utils.parseEther("120"));
+
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusOne])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("50"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("50"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("50"));
+
+        // will be set on monthPlusTwo
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTwo])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will be set on monthPlusThree
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusThree])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will be set on monthPlusFour
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusFour])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusFive
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusFive])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusSix
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusSix])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusSeven
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusSeven])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusEight EAREND: 87.5 + 14.58 + 11.66 + 8.75 + 5.83 + 2.91
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusEight])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusNine UNLOCK FEBREARY.
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusNine])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will be set on monthPlusTen UNLOCK MARCH. EAREND: 87.5 + 17.5 + 17.5 + 14.58 + 11.66 + 8.75 + 5.83 + 2.91
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTen])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will do notning
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusFivteen])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+        
+        
+        expect(await validator.getOtherTokensLength(tsCoin.address, user1.address)).to.equal(3);
+
+        for (let i = 0; i < 3; i++) {
+            expect((await validator.getOtherTokensByIndex(tsCoin.address, user1.address, i)).amount).to.equal(ethers.utils.parseEther("10"));
+        }
+
+        expect((await validator.userTokens(tsCoin.address, user1.address)).initLocked).to.equal(ethers.utils.parseEther("120")); // initLocked 50 + 10 + 10
+        expect((await validator.userTokens(tsCoin.address, user1.address)).lastCalculationTimestamp).to.equal(monthPlusTen); 
+        expect((await validator.userEarned(user1.address)).earned).to.equal(BigNumber.from("297499999999999999800"))
+        expect((await validator.userEarned(user1.address)).toClaim).to.equal(BigNumber.from("297499999999999999800"))
+
+    })
+
+        it("should lock tokens and delete all secondary", async function () {
+        let monthPlusOne = moment().utc(true).add(1, 'month').startOf('month').unix();
+        let monthPlusTwo = moment().utc(true).add(2, 'month').startOf('month').unix();
+        let monthPlusThree = moment().utc(true).add(3, 'month').startOf('month').unix();
+        let monthPlusFour = moment().utc(true).add(4, 'month').startOf('month').unix();
+        let monthPlusFive = moment().utc(true).add(5, 'month').startOf('month').unix();
+        let monthPlusSix = moment().utc(true).add(6, 'month').startOf('month').unix();
+        let monthPlusSeven = moment().utc(true).add(7, 'month').startOf('month').unix();
+        let monthPlusEight = moment().utc(true).add(8, 'month').startOf('month').unix();
+        let monthPlusNine = moment().utc(true).add(9, 'month').startOf('month').unix();
+        let monthPlusTen = moment().utc(true).add(10, 'month').startOf('month').unix();
+        let monthPlusSeventeen = moment().utc(true).add(17, 'month').startOf('month').unix();
+
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEight, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEight, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusTen, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusTen, 350);
+
+        await expect(testUsdt.connect(user1).approve(proxyRouter.address, ethers.utils.parseEther("6000")))
+            .to.emit(testUsdt, "Approval").withArgs(user1.address, proxyRouter.address, ethers.utils.parseEther("6000"));
+
+        await expect(proxyRouter.connect(user1).buy(tsCoin.address, ethers.utils.parseEther("6000")))
+            .to.emit(proxyRouter, "Buy").withArgs(tsCoin.address, user1.address, true, ethers.utils.parseEther("6000"), ethers.utils.parseEther("120"), 50)
+            .to.emit(tsCoin, "Transfer").withArgs(proxyRouter.address, user1.address, ethers.utils.parseEther("120"));
+
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusOne])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("50"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("50"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("50"));
+
+        // will be set on monthPlusTwo
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTwo])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will be set on monthPlusThree
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusThree])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will be set on monthPlusFour
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusFour])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusFive
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusFive])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusSix
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusSix])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusSeven
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusSeven])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusEight EAREND: 87.5 + 14.58 + 11.66 + 8.75 + 5.83 + 2.91
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusEight])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will be set on monthPlusNine UNLOCK FEBREARY.
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusNine])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will be set on monthPlusTen UNLOCK MARCH. EAREND: 87.5 + 17.5 + 17.5 + 14.58 + 11.66 + 8.75 + 5.83 + 2.91
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTen])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will do notning
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusSeventeen])
+        await ethers.provider.send("evm_mine")
+
+        await expect(validator.connect(user1).unlock(tsCoin.address, ethers.utils.parseEther("5")))
+            .to.emit(validator, "Unlocked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("5"))
+            .to.emit(tsCoin, "Transfer").withArgs(validator.address, user1.address, ethers.utils.parseEther("5"));
+
+        
+        expect(await validator.getOtherTokensLength(tsCoin.address, user1.address)).to.equal(0);
+
+        expect((await validator.userTokens(tsCoin.address, user1.address)).initLocked).to.equal(ethers.utils.parseEther("135")); // initLocked 50 + 10 + 10
+        expect((await validator.userTokens(tsCoin.address, user1.address)).lastCalculationTimestamp).to.equal(monthPlusTen); 
+        expect((await validator.userEarned(user1.address)).earned).to.equal(BigNumber.from("297499999999999999800"))
+        expect((await validator.userEarned(user1.address)).toClaim).to.equal(BigNumber.from("297499999999999999800"))
+
+    })
+
+    it("should lock tokens and check limit payout for secondary", async function () {
+        let monthPlusOne = moment().utc(true).add(1, 'month').startOf('month').unix();
+        let monthPlusTwo = moment().utc(true).add(2, 'month').startOf('month').unix();
+        let monthPlusNine = moment().utc(true).add(9, 'month').startOf('month').unix();
+        let monthPlusEleven = moment().utc(true).add(11, 'month').startOf('month').unix();
+        let monthPlusEighteen = moment().utc(true).add(18, 'month').startOf('month').unix();
+
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusNine, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusNine, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEleven, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEleven, 350);
+
+        await expect(testUsdt.connect(user1).approve(proxyRouter.address, ethers.utils.parseEther("6000")))
+            .to.emit(testUsdt, "Approval").withArgs(user1.address, proxyRouter.address, ethers.utils.parseEther("6000"));
+
+        await expect(proxyRouter.connect(user1).buy(tsCoin.address, ethers.utils.parseEther("6000")))
+            .to.emit(proxyRouter, "Buy").withArgs(tsCoin.address, user1.address, true, ethers.utils.parseEther("6000"), ethers.utils.parseEther("120"), 50)
+            .to.emit(tsCoin, "Transfer").withArgs(proxyRouter.address, user1.address, ethers.utils.parseEther("120"));
+
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusOne])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("60"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("60"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("60"));
+
+        // will be set on monthPlusTwo
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTwo])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("70"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("70"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("70"));
+
+        // will be set on monthPlusEight EAREND: 105 + 105
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusNine])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will be set on monthPlusTen EAREND: 227.5 + 2.91
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusEighteen])
+        await ethers.provider.send("evm_mine")
+
+        await expect(validator.connect(user1).unlock(tsCoin.address, ethers.utils.parseEther("5")))
+            .to.emit(validator, "Unlocked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("5"))
+            .to.emit(tsCoin, "Transfer").withArgs(validator.address, user1.address, ethers.utils.parseEther("5"));
+        
+        expect(await validator.getOtherTokensLength(tsCoin.address, user1.address)).to.equal(0);
+
+        expect((await validator.userTokens(tsCoin.address, user1.address)).initLocked).to.equal(ethers.utils.parseEther("135")); // initLocked 50 + 10 + 10
+        expect((await validator.userTokens(tsCoin.address, user1.address)).lastCalculationTimestamp).to.equal(monthPlusEleven); 
+        expect((await validator.userEarned(user1.address)).earned).to.equal(BigNumber.from("440416666666666666650"))
+        expect((await validator.userEarned(user1.address)).toClaim).to.equal(BigNumber.from("440416666666666666650"))
+
+    })
+
+    it("should lock tokens and check limit payout > AMOUNT_OF_MONTHS_TO_UNLOCK for secondary", async function () {
+        let monthPlusOne = moment().utc(true).add(1, 'month').startOf('month').unix();
+        let monthPlusTwo = moment().utc(true).add(2, 'month').startOf('month').unix();
+        let monthPlusTen = moment().utc(true).add(10, 'month').startOf('month').unix();
+        let monthPlusTwelve = moment().utc(true).add(12, 'month').startOf('month').unix();
+        let monthPlusNineteen = moment().utc(true).add(19, 'month').startOf('month').unix();
+
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusTen, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusTen, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusTwelve, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusTwelve, 350);
+
+        await expect(testUsdt.connect(user1).approve(proxyRouter.address, ethers.utils.parseEther("6000")))
+            .to.emit(testUsdt, "Approval").withArgs(user1.address, proxyRouter.address, ethers.utils.parseEther("6000"));
+
+        await expect(proxyRouter.connect(user1).buy(tsCoin.address, ethers.utils.parseEther("6000")))
+            .to.emit(proxyRouter, "Buy").withArgs(tsCoin.address, user1.address, true, ethers.utils.parseEther("6000"), ethers.utils.parseEther("120"), 50)
+            .to.emit(tsCoin, "Transfer").withArgs(proxyRouter.address, user1.address, ethers.utils.parseEther("120"));
+
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusOne])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("50"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("50"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("50"));
+
+        // will be set on monthPlusTwo
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTwo])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("60"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("60"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("60"));
+
+        // will be set on monthPlusTen EAREND: 87.5 + 105
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTen])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will be set on monthPlusNineteen EAREND: 192.5 + 2.91
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusNineteen])
+        await ethers.provider.send("evm_mine")
+
+        await expect(validator.connect(user1).unlock(tsCoin.address, ethers.utils.parseEther("5")))
+            .to.emit(validator, "Unlocked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("5"))
+            .to.emit(tsCoin, "Transfer").withArgs(validator.address, user1.address, ethers.utils.parseEther("5"));
+        
+        expect(await validator.getOtherTokensLength(tsCoin.address, user1.address)).to.equal(0);
+
+        expect((await validator.userTokens(tsCoin.address, user1.address)).initLocked).to.equal(ethers.utils.parseEther("115")); // initLocked 50 + 10 + 10
+        expect((await validator.userTokens(tsCoin.address, user1.address)).lastCalculationTimestamp).to.equal(monthPlusTwelve); 
+        expect((await validator.userEarned(user1.address)).earned).to.equal(BigNumber.from("387916666666666666650"))
+        expect((await validator.userEarned(user1.address)).toClaim).to.equal(BigNumber.from("387916666666666666650"))
+
+    })
+
+    it("should lock tokens and check claim too often", async function () {
+        let monthPlusOne = moment().utc(true).add(1, 'month').startOf('month').unix();
+        let monthPlusTwo = moment().utc(true).add(2, 'month').startOf('month').unix();
+        let monthPlusEightAndThree = moment().utc(true).add(8, 'month').startOf('month').add(3, 'days').unix();
+        let monthPlusEightAndFour = moment().utc(true).add(8, 'month').startOf('month').add(4, 'days').unix();
+        let monthPlusEightAndFive = moment().utc(true).add(8, 'month').startOf('month').add(5, 'days').unix();
+        let monthPlusEightAndSix = moment().utc(true).add(8, 'month').startOf('month').add(6, 'days').unix();
+        let monthPlusEightAndSeven = moment().utc(true).add(8, 'month').startOf('month').add(7, 'days').unix();
+        let monthPlusNine = moment().utc(true).add(9, 'month').startOf('month').unix();
+        let monthPlusTen = moment().utc(true).add(10, 'month').startOf('month').unix();
+
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEightAndThree, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEightAndThree, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEightAndFour, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEightAndFour, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEightAndFive, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEightAndFive, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEightAndSix, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEightAndSix, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEightAndSeven, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEightAndSeven, 350);
+
+        await expect(testUsdt.connect(user1).approve(proxyRouter.address, ethers.utils.parseEther("6000")))
+            .to.emit(testUsdt, "Approval").withArgs(user1.address, proxyRouter.address, ethers.utils.parseEther("6000"));
+
+        await expect(proxyRouter.connect(user1).buy(tsCoin.address, ethers.utils.parseEther("6000")))
+            .to.emit(proxyRouter, "Buy").withArgs(tsCoin.address, user1.address, true, ethers.utils.parseEther("6000"), ethers.utils.parseEther("120"), 50)
+            .to.emit(tsCoin, "Transfer").withArgs(proxyRouter.address, user1.address, ethers.utils.parseEther("120"));
+
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusOne])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("50"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("50"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("50"));
+
+        // will be set on monthPlusTwo
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTwo])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        // will be set on monthPlusEight EAREND: (87.5 + 14.58) * 5
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusNine])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+
+        // will do nothing
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTen])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+        
+        expect(await validator.getOtherTokensLength(tsCoin.address, user1.address)).to.equal(2);
+
+        for (let i = 0; i < 2; i++) {
+            expect((await validator.getOtherTokensByIndex(tsCoin.address, user1.address, i)).amount).to.equal(ethers.utils.parseEther("10"));
+        }
+
+        expect((await validator.userTokens(tsCoin.address, user1.address)).initLocked).to.equal(ethers.utils.parseEther("60")); // initLocked 50 + 10 + 10
+        expect((await validator.userTokens(tsCoin.address, user1.address)).lastCalculationTimestamp).to.equal(monthPlusEightAndSeven); 
+        expect((await validator.userEarned(user1.address)).earned).to.equal(BigNumber.from("510416666666666666500"))
+        expect((await validator.userEarned(user1.address)).toClaim).to.equal(BigNumber.from("510416666666666666500"))
+
+    })
+
+    it("should lock tokens and check adding to init in cycle", async function () {
+        let monthPlusOne = moment().utc(true).add(1, 'month').startOf('month').unix();
+        let monthPlusTwo = moment().utc(true).add(2, 'month').startOf('month').unix();
+        let monthPlusEight = moment().utc(true).add(8, 'month').startOf('month').unix();
+        let monthPlusNine = moment().utc(true).add(9, 'month').startOf('month').unix();
+        let monthPlusTen = moment().utc(true).add(10, 'month').startOf('month').unix();
+
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusEight, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusEight, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusNine, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusNine, 350);
+        await expect(validator.addTokensPayoutBonds(tsCoin.address, monthPlusTen, 350)).to.emit(validator, "AddedNewTokenPayoutBond").withArgs(tsCoin.address, monthPlusTen, 350);
+
+        await expect(testUsdt.connect(user1).approve(proxyRouter.address, ethers.utils.parseEther("6000")))
+            .to.emit(testUsdt, "Approval").withArgs(user1.address, proxyRouter.address, ethers.utils.parseEther("6000"));
+
+        await expect(proxyRouter.connect(user1).buy(tsCoin.address, ethers.utils.parseEther("6000")))
+            .to.emit(proxyRouter, "Buy").withArgs(tsCoin.address, user1.address, true, ethers.utils.parseEther("6000"), ethers.utils.parseEther("120"), 50)
+            .to.emit(tsCoin, "Transfer").withArgs(proxyRouter.address, user1.address, ethers.utils.parseEther("120"));
+
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusOne])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("50"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("50"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("50"));
+
+        // will be set on monthPlusTwo
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTwo])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("70"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("70"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("70"));
+
+        // will be set on monthPlusNine EAREND: (87.5 + 87.5) + (87.5 + 87.5) + (210)
+        await ethers.provider.send("evm_setNextBlockTimestamp", [monthPlusTen])
+        await ethers.provider.send("evm_mine")
+
+        await expect(tsCoin.connect(user1).approveAndCall(validator.address, ethers.utils.parseEther("10"), "0x0000000000000000000000000000000000000000000000000000000000000001"))
+            .to.emit(validator, "Locked").withArgs(tsCoin.address, user1.address, ethers.utils.parseEther("10"))
+            .to.emit(tsCoin, "Transfer").withArgs(user1.address, validator.address, ethers.utils.parseEther("10"));
+
+        expect(await validator.getOtherTokensLength(tsCoin.address, user1.address)).to.equal(1);
+
+        for (let i = 0; i < 1; i++) {
+            expect((await validator.getOtherTokensByIndex(tsCoin.address, user1.address, i)).amount).to.equal(ethers.utils.parseEther("10"));
+        }
+
+        expect((await validator.userTokens(tsCoin.address, user1.address)).initLocked).to.equal(ethers.utils.parseEther("120")); // initLocked 50 + 10 + 10
+        expect((await validator.userTokens(tsCoin.address, user1.address)).lastCalculationTimestamp).to.equal(monthPlusTen); 
+        expect((await validator.userEarned(user1.address)).earned).to.equal(BigNumber.from("560000000000000000000"))
+        expect((await validator.userEarned(user1.address)).toClaim).to.equal(BigNumber.from("560000000000000000000"))
 
     })
 

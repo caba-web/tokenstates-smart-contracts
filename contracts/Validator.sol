@@ -442,7 +442,6 @@ contract Validator is Ownable, ReentrancyGuard {
 
         // array is limited to 6 elems
         if (_userTokens.otherTokens.length != 0 && _newTimestamp == _userTokens.otherTokens[_userTokens.otherTokens.length - 1].timestamp) {
-            // Today is September. Check if day < 15 then add to 01.10 else 01.11
             userTokens[_tokenAddress][_user]
                 .otherTokens[_userTokens.otherTokens.length - 1]
                 .amount += _amount;
@@ -461,52 +460,46 @@ contract Validator is Ownable, ReentrancyGuard {
 
         uint256 _deleted;
 
-        // 01.2022 and block = 05.01.2022 false
-        // 01.2022 and block = 05.02.2022 true => 02.2022 and block = 05.02.2022 false
-
-        if (_userTokens.lastCalculationTimestamp >= block.timestamp || _userTokens.initTimeCreate == uint256(0)) {
+        if (_userTokens.initTimeCreate >= block.timestamp || _userTokens.initTimeCreate == uint256(0)) {
             return;
         }
 
-        uint256 _months = BokkyPooBahsDateTimeLibrary.diffMonths(
-            _userTokens.lastCalculationTimestamp,
-            block.timestamp
-        );
-        uint256 _monthsInit = BokkyPooBahsDateTimeLibrary.diffMonths(
+        uint256 _earnings;
+        uint256 _lastCalculationTimestamp;
+        uint256 _initLocked = _userTokens.initLocked;
+
+        if (BokkyPooBahsDateTimeLibrary.diffMonths(
             _userTokens.initTimeCreate,
             block.timestamp
-        );
-        uint256 _earnings;
-
-        if (_monthsInit >= AMOUNT_OF_MONTHS_TO_UNLOCK && _months != 0) {
+        ) >= AMOUNT_OF_MONTHS_TO_UNLOCK) {
             for (uint256 i = 0; i < _token.usedTimestamps.length; i++) {
                 if (
                     _userTokens.initTimeCreate < _token.usedTimestamps[i] &&
                     _userTokens.lastCalculationTimestamp < _token.usedTimestamps[i] &&
                     _token.usedTimestamps[i] < block.timestamp
                 ) {
-                    uint256 _initEarnings = (_userTokens.initLocked *
+                    _lastCalculationTimestamp = _token.usedTimestamps[i];
+                    uint256 _initEarnings = (_initLocked *
                         _token.timestampToPercent[_token.usedTimestamps[i]]) / 10_000;
                     _earnings += _initEarnings;
-
                     for (
                         uint256 ii = 0;
-                        ii < _userTokens.otherTokens.length;
+                        ii < _userTokens.otherTokens.length - _deleted;
                         ii++
                     ) {
                         if (
                             _userTokens.otherTokens[ii].timestamp >
-                            block.timestamp
+                            _token.usedTimestamps[i]
                         ) {
                             break;
                         }
                         uint256 _monthsOtherTokensDiff = BokkyPooBahsDateTimeLibrary
                                 .diffMonths(
                                     _userTokens.otherTokens[ii].timestamp,
-                                    block.timestamp
+                                    _token.usedTimestamps[i]
                                 );
 
-                        uint256 _othetTokensEarnings = (_userTokens
+                        uint256 _otherTokensEarnings = (_userTokens
                             .otherTokens[ii]
                             .amount *
                             (
@@ -517,8 +510,10 @@ contract Validator is Ownable, ReentrancyGuard {
                              _token.timestampToPercent[_token.usedTimestamps[i]]) /
                             (10_000 * AMOUNT_OF_MONTHS_TO_UNLOCK);
                         _earnings += (
-                            _othetTokensEarnings <= _initEarnings
-                                ? _othetTokensEarnings
+                            _otherTokensEarnings <= _initEarnings
+                                ? _otherTokensEarnings
+                                : _monthsOtherTokensDiff > AMOUNT_OF_MONTHS_TO_UNLOCK
+                                ? _otherTokensEarnings
                                 : _initEarnings
                         );
                         if (
@@ -526,45 +521,28 @@ contract Validator is Ownable, ReentrancyGuard {
                         ) {
                             // reset months
                             _deleteFromUserTokens(_tokenAddress, _user, ii - _deleted);
-                            // userTokens[_tokenAddress][_user].otherTokens[
-                            //         ii - _deleted
-                            //     ] = _userTokens.otherTokens[
-                            //     _userTokens.otherTokens.length - 1 - _deleted
-                            // ];
-                            // userTokens[_tokenAddress][_user].otherTokens.pop();
-
                             // update initLocked
                             userTokens[_tokenAddress][_user]
                                 .initLocked += _userTokens
-                                .otherTokens[ii - _deleted]
-                                .amount;
-
-                            _userTokens.initLocked += _userTokens
                                 .otherTokens[ii]
                                 .amount;
+
+                            _initLocked += _userTokens
+                                .otherTokens[ii]
+                                .amount;
+                            // _userTokens.initLocked += _userTokens
+                            //     .otherTokens[ii]
+                            //     .amount;
 
                             _deleted++;
                         }
                     }
                 }
             }
-            (
-                uint256 _todayYearWithMonths,
-                uint256 _todayMonthWithMonths,
-
-            ) = BokkyPooBahsDateTimeLibrary.timestampToDate(
-                    block.timestamp
-                );
-            uint256 _newTimestamp = BokkyPooBahsDateTimeLibrary
-                .timestampFromDate(
-                    _todayYearWithMonths,
-                    _todayMonthWithMonths,
-                    1
-                );
-
-            userTokens[_tokenAddress][_user]
-                .lastCalculationTimestamp = _newTimestamp;
-            
+            if (_lastCalculationTimestamp != uint256(0)) {
+                userTokens[_tokenAddress][_user]
+                    .lastCalculationTimestamp = _lastCalculationTimestamp;
+            }
             userEarned[_user].earned += _earnings * proxyRouterContract.tokens(_tokenAddress).price;
             userEarned[_user].toClaim += _earnings * proxyRouterContract.tokens(_tokenAddress).price;
         }
@@ -590,10 +568,6 @@ contract Validator is Ownable, ReentrancyGuard {
             );
             if (_months >= AMOUNT_OF_MONTHS_TO_UNLOCK) {
                 _deleteFromUserTokens(_tokenAddress, _user, i - _deleted);
-                // for(uint ii = i - _deleted; i - _deleted < _userTokens.otherTokens.length - 1; i++){
-                //     userTokens[_tokenAddress][_user].otherTokens[ii] = userTokens[_tokenAddress][_user].otherTokens[ii + 1];      
-                // }
-                // userTokens[_tokenAddress][_user].otherTokens.pop();
                 userTokens[_tokenAddress][_user]
                     .initLocked += _userTokens
                     .otherTokens[i]
@@ -632,10 +606,6 @@ contract Validator is Ownable, ReentrancyGuard {
                     return;
                 }
                 _deleteFromUserTokens(_tokenAddress, _user, i - _deleted);
-                // for(uint ii = i; i - _deleted < _userTokens.otherTokens.length-1; i++){
-                //     userTokens[_tokenAddress][_user].otherTokens[ii] = userTokens[_tokenAddress][_user].otherTokens[ii+1];      
-                // }
-                // userTokens[_tokenAddress][_user].otherTokens.pop();
                 _amount -= _userTokens.otherTokens[i - 1].amount;
                 _deleted++;
             }
